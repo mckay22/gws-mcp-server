@@ -6,6 +6,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strings"
 )
@@ -109,6 +110,26 @@ func (c Config) Presence() Presence {
 // the resource-server and powerful-application tiers land in M5/M8.
 func (c Config) Mode() string {
 	return ModeClassicDelegated
+}
+
+// RequirePersonal validates that the credentials classic-delegated mode needs
+// are present: the OAuth client id and secret of a GCP "Desktop app" client. It
+// returns a clear error naming every missing variable, or nil when both are
+// set. It reports only variable names, never any value. ConfigFromEnv still
+// requires nothing — this is the explicit gate that sign-in calls before
+// starting the installed-app OAuth flow.
+func (c Config) RequirePersonal() error {
+	var missing []string
+	if strings.TrimSpace(c.ClientID) == "" {
+		missing = append(missing, EnvClientID)
+	}
+	if strings.TrimSpace(c.ClientSecret) == "" {
+		missing = append(missing, EnvClientSecret)
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("classic-delegated mode requires %s", strings.Join(missing, " and "))
+	}
+	return nil
 }
 
 // Redact maps a possibly-secret value to a log-safe marker: "set" when it holds

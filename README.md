@@ -18,31 +18,47 @@ built to the same principles:
   called over plain `net/http` with `fields` projection — no generated API
   clients, minimal PII in model context.
 
-> **Status: M0 (scaffold).** Stdio MCP server with a `health` tool, env config
-> with presence-only reporting, gate flags, CI. Sign-in (installed-app OAuth)
-> and Gmail reads land next; then Calendar + Drive reads, the gated
-> write/send tools, Directory + audit (governance) reads, and a multi-user
-> resource-server mode validating bearer tokens from any OIDC IdP.
+> **Status: M1 (classic-delegated Gmail reads).** Stdio MCP server that signs
+> you in with your own Google account (installed-app OAuth: loopback + PKCE) and
+> reads Gmail as you: profile, labels, and message list/search/get. Next:
+> Calendar + Drive reads; then gated write/send tools, Directory + audit
+> (governance) reads, and a multi-user resource-server mode validating bearer
+> tokens from any OIDC IdP. See [docs/capabilities.md](docs/capabilities.md) for
+> the tool inventory.
 
-## Running
+## Running (classic-delegated mode)
+
+You need a Google Cloud OAuth client of type **Desktop app** (create one in your
+own GCP project — there is no shared client for an open-source server requesting
+sensitive scopes). Then:
 
 ```sh
 go build .
+export GWS_CLIENT_ID="…apps.googleusercontent.com"
+export GWS_CLIENT_SECRET="…"
 ./gws-mcp-server
 ```
 
-The server speaks MCP over stdio; diagnostics go to stderr. Until M1 the only
-tool is `health`, which reports version, mode, gate state, and which
-configuration variables are set (booleans only — never a value).
+The server speaks MCP over stdio; diagnostics go to stderr. Sign-in is **lazy**:
+nothing happens at startup, and on the first Gmail tool call the server prints an
+authorization URL to stderr (and opens your browser). You approve, Google
+redirects to a loopback address, and the token is held in memory for the
+process's lifetime. With no credentials configured the server still starts, with
+only the `health` tool registered.
 
-Flags: `--allow-writes` (write gate), `--allow-sends` (separate send gate).
+Flags: `--allow-writes` (write gate), `--allow-sends` (separate send gate) —
+no gated tools exist yet; the flags establish the contract.
 
 | Variable | Purpose |
 | --- | --- |
-| `GWS_CLIENT_ID` | OAuth client id (GCP "Desktop app" client) — consumed from M1; create your own in your own GCP project |
+| `GWS_CLIENT_ID` | OAuth client id (GCP "Desktop app" client). Required for the Gmail tools |
 | `GWS_CLIENT_SECRET` | The paired client secret. Never logged or returned |
 | `GWS_MCP_ALLOW_WRITES` | `true` opens the write gate (same as `--allow-writes`) |
 | `GWS_MCP_ALLOW_SENDS` | `true` opens the send gate (same as `--allow-sends`; independent of writes) |
+
+Testable for free on a consumer `@gmail.com`: create the OAuth client in
+*Testing* mode (no app verification needed for your own account) and add
+yourself as a test user.
 
 ## Development
 
@@ -51,6 +67,9 @@ gofmt -l .
 go vet ./...
 go test ./...
 ```
+
+Unit tests use recording HTTP mocks (no live Google, no credentials). A live
+smoke test against a real `@gmail.com` is a manual step.
 
 ## License
 

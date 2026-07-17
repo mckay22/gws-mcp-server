@@ -1,0 +1,399 @@
+// Package gapi is a thin HTTP client for the Google REST APIs (Gmail, Calendar,
+// Drive, the Admin SDK, Reports, …). It deliberately avoids the generated
+// google.golang.org/api clients (whose model trees bloat the binary): it owns
+// just the request plumbing the tools need — bearer auth, nextPageToken paging,
+// fields projection, and Retry-After / 429 / 503 / rate-limit-403 backoff — and
+// returns raw JSON for callers to decode into their own shapes.
+//
+// Unlike a single-host client, Google's APIs live on several hosts
+// (gmail.googleapis.com, www.googleapis.com, admin.googleapis.com). Callers pass
+// the fully-qualified service base (see the Base* constants) plus a
+// resource path; tests point every request at one httptest server via
+// WithBaseURL, which rewrites the scheme+host while preserving the path so a
+// single mux can route by path prefix.
+//
+// Tokens come from a caller-supplied TokenSource so every operating mode
+// (classic-delegated personal token, resource-server DWD/linked token) reuses
+// one client. The token is attached to every request and is never logged.
+package gapi
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Service base URLs — the fully-qualified host + version prefix for each Google
+// API. Callers pass one of these to Get/List alongside a resource path.
+const (
+	// BaseGmail is the Gmail API v1 base. Resource paths are user-scoped, e.g.
+	// "/users/me/profile".
+	BaseGmail = "https://gmail.googleapis.com/gmail/v1"
+)
+
+const (
+	// defaultTimeout bounds each HTTP round-trip.
+	defaultTimeout = 30 * time.Second
+
+	// maxResponseBytes caps how much of a single response we read, so a
+	// misbehaving endpoint can't exhaust memory.
+	maxResponseBytes = 8 << 20 // 8 MiB
+
+	// maxRetries is how many times a throttled/unavailable response (429, 503,
+	// or a rate-limit 403) is retried before the error is surfaced.
+	maxRetries = 4
+
+	// baseRetryDelay is the first backoff step when no Retry-After is given; it
+	// doubles each attempt up to maxRetryDelay.
+	baseRetryDelay = 500 * time.Millisecond
+
+	// maxRetryDelay caps any single backoff wait, so a hostile or huge
+	// Retry-After can't stall the caller indefinitely.
+	maxRetryDelay = 30 * time.Second
+
+	// maxPages and maxItems bound collection paging so a pathological
+	// nextPageToken chain can't loop unbounded.
+	maxPages = 200
+	maxItems = 50000
+)
+
+// TokenSource supplies a Google access token for a request. Implementations may
+// cache and refresh; the client calls it once per HTTP request and puts the
+// result in the Authorization header — never in a log.
+type TokenSource interface {
+	GoogleToken(ctx context.Context) (string, error)
+}
+
+// Option customizes a Client at construction. See WithBaseURL, WithHTTPClient.
+type Option func(*Client)
+
+// WithBaseURL rewrites the scheme+host of every request to point at base
+// (preserving each request's path and query), so tests can route all Google
+// hosts through one httptest server. An empty value is ignored.
+func WithBaseURL(base string) Option {
+	return func(c *Client) {
+		if base != "" {
+			c.hostOverride = strings.TrimRight(base, "/")
+		}
+	}
+}
+
+// WithHTTPClient overrides the underlying *http.Client (for tests, or custom
+// transports/timeouts). A nil client is ignored.
+func WithHTTPClient(h *http.Client) Option {
+	return func(c *Client) {
+		if h != nil {
+			c.http = h
+		}
+	}
+}
+
+// Client talks to the Google REST APIs. Construct it with New.
+type Client struct {
+	// hostOverride, when set, replaces the scheme+host of every request URL
+	// (tests only); the path and query are preserved.
+	hostOverride string
+	http         *http.Client
+	ts           TokenSource
+}
+
+// New returns a Client that draws tokens from ts. Without options it targets the
+// real Google API hosts over an *http.Client with a 30s timeout.
+func New(ts TokenSource, opts ...Option) *Client {
+	c := &Client{
+		http: &http.Client{Timeout: defaultTimeout},
+		ts:   ts,
+	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
+}
+
+// Error is a decoded Google API error. Non-2xx responses carry an envelope of
+// the form {"error":{"code":404,"message":"...","status":"NOT_FOUND",
+// "errors":[{"reason":"..."}]}}; this captures it alongside the HTTP status.
+// Callers can match it with errors.As.
+type Error struct {
+	Status  int    // HTTP status code
+	Message string // human-readable message from the envelope
+	Reason  string // Google's status/reason string, e.g. "NOT_FOUND" or "rateLimitExceeded"
+}
+
+// Error implements the error interface.
+func (e *Error) Error() string {
+	if e.Reason != "" {
+		return fmt.Sprintf("google: %d %s: %s", e.Status, e.Reason, e.Message)
+	}
+	if e.Message != "" {
+		return fmt.Sprintf("google: %d: %s", e.Status, e.Message)
+	}
+	return fmt.Sprintf("google: %d", e.Status)
+}
+
+// Get fetches a single resource at base+path (e.g. BaseGmail,
+// "/users/me/profile") and returns the raw JSON body on any 2xx status. A
+// non-2xx status is decoded into an *Error. The query, if any, is appended to
+// the URL.
+func (c *Client) Get(ctx context.Context, base, path string, query url.Values) (json.RawMessage, error) {
+	rawURL, err := c.endpoint(base, path, query)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := statusError(resp); err != nil {
+		return nil, err
+	}
+	return json.RawMessage(resp.body), nil
+}
+
+// List fetches a collection at base+path, following Google's nextPageToken
+// across pages, and returns every element of the itemsField arrays concatenated
+// in order. itemsField is the response key holding the array — it varies per
+// API (Gmail "messages"/"labels", Calendar/Drive "items"/"files", Directory
+// "users"/"groups"). Paging is bounded by maxPages/maxItems.
+func (c *Client) List(ctx context.Context, base, path string, query url.Values, itemsField string) ([]json.RawMessage, error) {
+	q := cloneValues(query)
+	var items []json.RawMessage
+
+	for page := 0; ; page++ {
+		if page >= maxPages {
+			return nil, fmt.Errorf("listing %s: exceeded max pages (%d)", path, maxPages)
+		}
+
+		raw, err := c.Get(ctx, base, path, q)
+		if err != nil {
+			return nil, err
+		}
+
+		// The array key varies per API but nextPageToken is universal, so decode
+		// the envelope dynamically.
+		var envelope map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			return nil, fmt.Errorf("decoding %s collection: %w", path, err)
+		}
+		if arr, ok := envelope[itemsField]; ok {
+			var pageItems []json.RawMessage
+			if err := json.Unmarshal(arr, &pageItems); err != nil {
+				return nil, fmt.Errorf("decoding %s.%s: %w", path, itemsField, err)
+			}
+			items = append(items, pageItems...)
+			if len(items) > maxItems {
+				return nil, fmt.Errorf("listing %s: exceeded max items (%d)", path, maxItems)
+			}
+		}
+
+		var nextToken string
+		if nt, ok := envelope["nextPageToken"]; ok {
+			if err := json.Unmarshal(nt, &nextToken); err != nil {
+				return nil, fmt.Errorf("decoding %s.nextPageToken: %w", path, err)
+			}
+		}
+		if nextToken == "" {
+			return items, nil
+		}
+		q.Set("pageToken", nextToken)
+	}
+}
+
+// response is the subset of an HTTP response the client acts on.
+type response struct {
+	status int
+	header http.Header
+	body   []byte
+}
+
+// do issues an authenticated request (method against rawURL, with an optional
+// body) and returns the response, retrying 429/503 and rate-limit 403s per
+// Retry-After (or bounded backoff). A non-nil body is resent on each retry and
+// gets a Content-Type: application/json header. Neither the bearer token nor the
+// request body is ever logged.
+func (c *Client) do(ctx context.Context, method, rawURL string, body []byte) (response, error) {
+	token, err := c.ts.GoogleToken(ctx)
+	if err != nil {
+		return response{}, fmt.Errorf("acquiring Google token: %w", err)
+	}
+
+	for attempt := 0; ; attempt++ {
+		// A fresh reader each attempt so a retried request resends the body.
+		var reqBody io.Reader
+		if body != nil {
+			reqBody = bytes.NewReader(body)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, rawURL, reqBody)
+		if err != nil {
+			return response{}, fmt.Errorf("building request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/json")
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+
+		httpResp, err := c.http.Do(req)
+		if err != nil {
+			return response{}, fmt.Errorf("calling Google: %w", err)
+		}
+		respBody, readErr := io.ReadAll(io.LimitReader(httpResp.Body, maxResponseBytes))
+		httpResp.Body.Close()
+		if readErr != nil {
+			return response{}, fmt.Errorf("reading Google response: %w", readErr)
+		}
+
+		resp := response{status: httpResp.StatusCode, header: httpResp.Header, body: respBody}
+
+		if retryable(resp) && attempt < maxRetries {
+			delay := retryDelay(resp.header.Get("Retry-After"), attempt)
+			select {
+			case <-ctx.Done():
+				return response{}, ctx.Err()
+			case <-time.After(delay):
+			}
+			continue
+		}
+
+		return resp, nil
+	}
+}
+
+// endpoint joins base+path (+query) into an absolute request URL, then rewrites
+// the scheme+host when a test override is set. path may be given with or without
+// a leading slash.
+func (c *Client) endpoint(base, path string, query url.Values) (string, error) {
+	raw := strings.TrimRight(base, "/") + "/" + strings.TrimLeft(path, "/")
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("parsing request URL: %w", err)
+	}
+	if c.hostOverride != "" {
+		ov, err := url.Parse(c.hostOverride)
+		if err != nil {
+			return "", fmt.Errorf("parsing base override: %w", err)
+		}
+		u.Scheme = ov.Scheme
+		u.Host = ov.Host
+	}
+	if len(query) > 0 {
+		u.RawQuery = query.Encode()
+	}
+	return u.String(), nil
+}
+
+// retryable reports whether a response warrants a throttling/availability retry:
+// 429 and 503 always, and 403 only when the error reason marks a rate limit
+// (Google signals user/project rate limits with a 403 + rateLimitExceeded).
+func retryable(resp response) bool {
+	switch resp.status {
+	case http.StatusTooManyRequests, http.StatusServiceUnavailable:
+		return true
+	case http.StatusForbidden:
+		return isRateLimitReason(reasonOf(resp.body))
+	default:
+		return false
+	}
+}
+
+// isRateLimitReason reports whether a Google error reason denotes a retryable
+// rate limit rather than a genuine authorization failure.
+func isRateLimitReason(reason string) bool {
+	switch reason {
+	case "rateLimitExceeded", "userRateLimitExceeded":
+		return true
+	default:
+		return false
+	}
+}
+
+// reasonOf extracts the Google error reason/status from a response body, or ""
+// when the body is not an error envelope.
+func reasonOf(body []byte) string {
+	e := decodeError(body)
+	if e == nil {
+		return ""
+	}
+	return e.Reason
+}
+
+// retryDelay picks how long to wait before retrying. It prefers the server's
+// Retry-After header (delta-seconds); when absent or unparseable it falls back
+// to exponential backoff (baseRetryDelay << attempt). Either way the result is
+// clamped to [0, maxRetryDelay].
+func retryDelay(retryAfter string, attempt int) time.Duration {
+	if secs, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && secs >= 0 {
+		return clampDelay(time.Duration(secs) * time.Second)
+	}
+	return clampDelay(baseRetryDelay << attempt)
+}
+
+// clampDelay bounds a backoff wait to [0, maxRetryDelay].
+func clampDelay(d time.Duration) time.Duration {
+	if d < 0 {
+		return 0
+	}
+	if d > maxRetryDelay {
+		return maxRetryDelay
+	}
+	return d
+}
+
+// statusError returns nil for a 2xx response, otherwise an *Error decoded from
+// the Google error envelope. When the body isn't that shape it falls back to the
+// HTTP status text. It never includes request credentials.
+func statusError(resp response) error {
+	if resp.status >= 200 && resp.status < 300 {
+		return nil
+	}
+	if e := decodeError(resp.body); e != nil {
+		e.Status = resp.status
+		return e
+	}
+	return &Error{Status: resp.status, Message: http.StatusText(resp.status)}
+}
+
+// decodeError parses a Google error envelope into an *Error (without the HTTP
+// status, which the caller fills in), or returns nil when the body carries no
+// recognizable error. Reason prefers the newer "status" field, falling back to
+// the first legacy errors[].reason.
+func decodeError(body []byte) *Error {
+	var env struct {
+		Error struct {
+			Message string `json:"message"`
+			Status  string `json:"status"`
+			Errors  []struct {
+				Reason string `json:"reason"`
+			} `json:"errors"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return nil
+	}
+	reason := env.Error.Status
+	if reason == "" && len(env.Error.Errors) > 0 {
+		reason = env.Error.Errors[0].Reason
+	}
+	if env.Error.Message == "" && reason == "" {
+		return nil
+	}
+	return &Error{Message: env.Error.Message, Reason: reason}
+}
+
+// cloneValues deep-copies url.Values so mutating the copy (e.g. adding
+// pageToken) never touches the caller's map. A nil input yields a fresh, usable
+// map.
+func cloneValues(in url.Values) url.Values {
+	out := make(url.Values, len(in))
+	for k, vs := range in {
+		out[k] = append([]string(nil), vs...)
+	}
+	return out
+}

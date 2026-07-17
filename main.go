@@ -15,6 +15,8 @@ import (
 	"os/signal"
 
 	"github.com/mckay22/gws-mcp-server/internal/config"
+	"github.com/mckay22/gws-mcp-server/internal/gapi"
+	"github.com/mckay22/gws-mcp-server/internal/googleauth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -68,13 +70,23 @@ func run() error {
 	return newMCPServer(cfg).Run(ctx, &mcp.StdioTransport{})
 }
 
-// newMCPServer builds a server with every available tool registered. M0
-// registers only health; the Google-backed tools light up from M1, and like the
-// sibling entra-mcp-server the server will start health-only when credentials
-// are absent rather than failing.
+// newMCPServer builds a server with every available tool registered. health is
+// always present. The Gmail read tools require classic-delegated credentials
+// (GWS_CLIENT_ID + GWS_CLIENT_SECRET); when they are absent the server still
+// starts with just health, and the Gmail tools light up once the OAuth client is
+// configured — mirroring the sibling entra-mcp-server. Sign-in itself is lazy:
+// it happens on the first Gmail tool call, never here.
 func newMCPServer(cfg config.Config) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: serverName, Version: version}, nil)
 	registerHealth(server, cfg)
+
+	creds, err := googleauth.NewPersonal(cfg, requiredScopes(cfg))
+	if err != nil {
+		// No secret value is ever in this error — it reports missing config only.
+		slog.Warn("Gmail tools disabled until credentials are configured", "reason", err)
+		return server
+	}
+	registerGmailReadTools(server, gapi.New(creds))
 	return server
 }
 
