@@ -18,8 +18,10 @@ built to the same principles:
   called over plain `net/http` with `fields` projection — no generated API
   clients, minimal PII in model context.
 
-> **Status: M8 (reads + gated writes/sends + Directory + governance + powerful
-> tiers + resource-server mode).** Signs you in with your own Google account
+> **Status: M9 (feature-complete per PLAN.md).** All nine milestones landed:
+> reads + gated writes/sends + Directory + governance + both powerful tiers +
+> resource-server mode, plus packaging (Docker, release workflow, quickstart,
+> security doc). Signs you in with your own Google account
 > (installed-app OAuth: loopback + PKCE) and acts as you across Gmail, Calendar,
 > and Drive: reads by default, gated mutations behind `--allow-writes`, and
 > irreversible/egress actions behind a separate `--allow-sends` (dry-run previews
@@ -101,6 +103,24 @@ go test ./...
 
 Unit tests use recording HTTP mocks (no live Google, no credentials). A live
 smoke test against a real `@gmail.com` is a manual step.
+
+### Docker
+
+```sh
+docker build -t gws-mcp-server .
+```
+
+A scratch-based static binary (+ CA certs), running as an unprivileged uid,
+intended for resource-server mode. See [docs/quickstart.md](docs/quickstart.md).
+
+## Documentation
+
+- [docs/quickstart.md](docs/quickstart.md) — $0 setup walkthroughs for all three
+  tiers (GCP OAuth client, Cloud Identity, domain-wide delegation, Docker).
+- [docs/auth.md](docs/auth.md) — the identity model (the three tiers, DWD, the
+  designed-but-deferred linked-token backend).
+- [docs/capabilities.md](docs/capabilities.md) — the full tool inventory.
+- [SECURITY.md](SECURITY.md) — security posture and reporting.
 
 ## License
 

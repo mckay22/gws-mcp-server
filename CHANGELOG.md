@@ -8,6 +8,21 @@ by milestone.
 
 ### Added
 
+- **M9 — packaging & polish.** A `Dockerfile` (multi-stage: Go build → `scratch`
+  with CA certs, static `CGO_ENABLED=0` binary, unprivileged uid) plus
+  `.dockerignore`; a `release.yml` workflow that cross-compiles six targets
+  (linux/darwin/windows × amd64/arm64), archives them with SHA-256 checksums, and
+  publishes a GitHub release on a `v*` tag. New docs: `docs/quickstart.md` ($0
+  setup walkthroughs for all three tiers — consumer OAuth client, Cloud Identity
+  Free, domain-wide delegation, Docker) and `SECURITY.md` (posture: delegated by
+  default, the two-gate model, least-privilege scopes, resource-server token
+  validation with no pass-through, credential handling). On batching: the
+  deprecated global-batch endpoint is not used, and per-API homogeneous batch was
+  evaluated and deferred — the bulk application-tier tools already provide
+  per-item outcomes via independent sequential calls, which is portable across
+  APIs and correct at this scale; per-API batch remains a future optimization.
+  No new dependencies. **This completes the PLAN.md roadmap.**
+
 - **M8 — powerful-application tier (`--app-only`).** A tier whose `app_*` tools
   take a required `user` target and act on that principal via a SEPARATE
   service account's domain-wide delegation, reusing the DWD backend by injecting

@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Build release binaries
+        run: |
+          mkdir -p dist
+          VERSION="${GITHUB_REF_NAME}"
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            GOOS="${target%/*}"; GOARCH="${target#*/}"
+            out="gws-mcp-server-${VERSION}-${GOOS}-${GOARCH}"
+            ext=""
+            if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath \
+              -ldflags="-s -w -X main.version=${VERSION}" -o "dist/${out}${ext}" .
+            if [ "$GOOS" = "windows" ]; then
+              (cd dist && zip "${out}.zip" "${out}${ext}" && rm "${out}${ext}")
+            else
+              (cd dist && tar -czf "${out}.tar.gz" "${out}${ext}" && rm "${out}${ext}")
+            fi
+          done
+          (cd dist && sha256sum * > checksums.txt)
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes

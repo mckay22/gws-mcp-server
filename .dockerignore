@@ -1,0 +1,30 @@
+.git
+.github
+.gitignore
+.dockerignore
+Dockerfile
+dist
+bin
+/gws-mcp-server
+/gws-mcp-server.exe
+*.exe
+*.test
+*.out
+coverage.out
+*.prof
+# Local env / secrets and token caches — never build into an image.
+.env
+*.local
+/.cache
+*.token
+# Editor / OS
+.DS_Store
+.idea
+.vscode
+# Docs & meta (not needed for the build).
+README.md
+CHANGELOG.md
+PLAN.md
+CLAUDE.md
+LICENSE
+docs
