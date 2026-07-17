@@ -1,0 +1,19 @@
+# Binaries
+/gws-mcp-server
+/gws-mcp-server.exe
+*.exe
+*.test
+*.out
+
+# Local env / secrets — never commit
+.env
+*.local
+
+# Token caches (classic-delegated mode)
+/.cache/
+*.token
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
