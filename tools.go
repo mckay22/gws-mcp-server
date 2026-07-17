@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 
 	"github.com/mckay22/gws-mcp-server/internal/gapi"
@@ -23,6 +24,15 @@ func clampLimit(n int) int {
 	default:
 		return n
 	}
+}
+
+// jsonString marshals v to a compact JSON string.
+func jsonString(v any) (string, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // toolError surfaces a Google API failure to the caller: when the client returns

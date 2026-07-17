@@ -18,14 +18,15 @@ built to the same principles:
   called over plain `net/http` with `fields` projection — no generated API
   clients, minimal PII in model context.
 
-> **Status: M2 (classic-delegated reads: Gmail, Calendar, Drive).** Stdio MCP
+> **Status: M3 (classic-delegated reads + gated writes/sends).** Stdio MCP
 > server that signs you in with your own Google account (installed-app OAuth:
-> loopback + PKCE) and reads as you: Gmail (profile, labels,
-> message list/search/get), Calendar (calendars, events, free/busy), and Drive
-> (list/search, file content). Next: gated write/send tools, Directory + audit
-> (governance) reads, and a multi-user resource-server mode validating bearer
-> tokens from any OIDC IdP. See [docs/capabilities.md](docs/capabilities.md) for
-> the tool inventory.
+> loopback + PKCE) and acts as you across Gmail, Calendar, and Drive: reads by
+> default, plus gated mutations (drafts, labels, uploads) behind
+> `--allow-writes` and irreversible/egress actions (mail send/reply, invites,
+> sharing) behind a separate `--allow-sends`. Gated tools return dry-run
+> previews until their gate is open. Next: Directory + audit (governance) reads,
+> and a multi-user resource-server mode validating bearer tokens from any OIDC
+> IdP. See [docs/capabilities.md](docs/capabilities.md) for the tool inventory.
 
 ## Running (classic-delegated mode)
 

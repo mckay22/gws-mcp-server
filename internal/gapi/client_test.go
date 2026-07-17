@@ -213,7 +213,7 @@ func TestPostSendsJSONBody(t *testing.T) {
 	defer srv.Close()
 
 	c := newClient(t, srv, staticToken{token: "t"})
-	raw, err := c.Post(context.Background(), BaseCalendar, "/freeBusy", map[string]any{"timeMin": "2026-01-01T00:00:00Z"})
+	raw, err := c.Post(context.Background(), BaseCalendar, "/freeBusy", nil, map[string]any{"timeMin": "2026-01-01T00:00:00Z"})
 	if err != nil {
 		t.Fatalf("Post: %v", err)
 	}
@@ -231,6 +231,80 @@ func TestPostSendsJSONBody(t *testing.T) {
 	}
 }
 
+func TestPatchSendsBodyAndReturnsResource(t *testing.T) {
+	var gotMethod, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		_, _ = w.Write([]byte(`{"id":"ev1","summary":"Updated"}`))
+	}))
+	defer srv.Close()
+
+	c := newClient(t, srv, staticToken{token: "t"})
+	raw, err := c.Patch(context.Background(), BaseCalendar, "/calendars/primary/events/ev1", nil, map[string]any{"summary": "Updated"})
+	if err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	if gotMethod != http.MethodPatch {
+		t.Errorf("method = %q, want PATCH", gotMethod)
+	}
+	if !strings.Contains(gotBody, `"summary":"Updated"`) {
+		t.Errorf("body = %q", gotBody)
+	}
+	if !strings.Contains(string(raw), "Updated") {
+		t.Errorf("response = %s", raw)
+	}
+}
+
+func TestDeletePassesQuery(t *testing.T) {
+	var gotMethod, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotQuery = r.URL.RawQuery
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := newClient(t, srv, staticToken{token: "t"})
+	_, err := c.Delete(context.Background(), BaseCalendar, "/calendars/primary/events/ev1", url.Values{"sendUpdates": {"all"}})
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Errorf("method = %q, want DELETE", gotMethod)
+	}
+	if gotQuery != "sendUpdates=all" {
+		t.Errorf("query = %q, want sendUpdates=all", gotQuery)
+	}
+}
+
+func TestPostRawSendsContentType(t *testing.T) {
+	var gotContentType string
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotContentType = r.Header.Get("Content-Type")
+		gotBody, _ = io.ReadAll(r.Body)
+		_, _ = w.Write([]byte(`{"id":"file1","name":"upload.txt"}`))
+	}))
+	defer srv.Close()
+
+	c := newClient(t, srv, staticToken{token: "t"})
+	raw, err := c.PostRaw(context.Background(), BaseDriveUpload, "/files", url.Values{"uploadType": {"multipart"}}, "multipart/related; boundary=abc", []byte("--abc--"))
+	if err != nil {
+		t.Fatalf("PostRaw: %v", err)
+	}
+	if gotContentType != "multipart/related; boundary=abc" {
+		t.Errorf("content-type = %q", gotContentType)
+	}
+	if string(gotBody) != "--abc--" {
+		t.Errorf("body = %q", gotBody)
+	}
+	if !strings.Contains(string(raw), "file1") {
+		t.Errorf("response = %s", raw)
+	}
+}
+
 func TestPostDecodesError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -239,7 +313,7 @@ func TestPostDecodesError(t *testing.T) {
 	defer srv.Close()
 
 	c := newClient(t, srv, staticToken{token: "t"})
-	_, err := c.Post(context.Background(), BaseCalendar, "/freeBusy", map[string]any{})
+	_, err := c.Post(context.Background(), BaseCalendar, "/freeBusy", nil, map[string]any{})
 	var ge *Error
 	if !errors.As(err, &ge) || ge.Status != 400 || ge.Reason != "INVALID_ARGUMENT" {
 		t.Fatalf("error = %v, want decoded 400 INVALID_ARGUMENT", err)

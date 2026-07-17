@@ -57,8 +57,36 @@ Scope: `https://www.googleapis.com/auth/drive.readonly`.
 | `list_files` | 🟢 | List (recent-first) or search files with Drive's query syntax. One page of metadata; `nextPageToken`; optional shared-drive span. Trash excluded by default. |
 | `get_file_content` | 🟢 | A file's text content by id. Google Docs/Sheets/Slides are exported to text/CSV; other files download directly; binary-only files are rejected. Capped at 200 KiB. |
 
+## Gated writes and sends (M3)
+
+Two independent gates. `--allow-writes` (or `GWS_MCP_ALLOW_WRITES=true`) enables
+reversible mutations 🟡; `--allow-sends` (or `GWS_MCP_ALLOW_SENDS=true`) enables
+irreversible/egress actions 🔴. **The write gate never implies the send gate.**
+With a gate closed, its tools return a **dry-run preview** — the exact method,
+URL, and body — and make no Google call. Extra OAuth scopes
+(`gmail.modify`/`gmail.send`, `calendar.events`, `drive`) are requested only when
+the matching gate is open.
+
+| Tool | Kind | Description |
+| --- | --- | --- |
+| `gmail_create_draft` | 🟡 | Save a draft (not sent). |
+| `gmail_modify` | 🟡 | Add/remove message labels — the mechanism behind read/unread, archive, star. |
+| `gmail_send` | 🔴 | Send a new message as the user. Preview shows full To/Cc/Subject/body. |
+| `gmail_reply` | 🔴 | Send a reply within a thread. |
+| `create_appointment` | 🟡 | Create an event with **no attendees** (nobody emailed). |
+| `create_event_with_attendees` | 🔴 | Create an event and email invitations (`sendUpdates=all`). |
+| `update_event` | 🔴 | Patch an event and notify attendees. |
+| `cancel_event` | 🔴 | Delete/cancel an event and notify attendees. |
+| `respond_to_event` | 🔴 | Set the user's RSVP and notify the organizer. |
+| `upload_file` | 🟡 | Create a Drive file from text content (multipart upload). |
+| `share_file` | 🔴 | Grant a permission on a file/folder — egress. |
+
+The Calendar **attendee split is the gate split**: an appointment with no
+attendees notifies no one (write gate); anything that emails attendees or the
+organizer is send-gated.
+
 ## Later milestones
 
-Gated writes/sends, Directory (Admin SDK), governance (Reports/audit), the
-powerful-delegated and powerful-application tiers, and the multi-user
-resource-server mode land in subsequent milestones.
+Directory (Admin SDK), governance (Reports/audit), the powerful-delegated and
+powerful-application tiers, and the multi-user resource-server mode land in
+subsequent milestones.

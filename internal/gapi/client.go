@@ -43,6 +43,10 @@ const (
 
 	// BaseDrive is the Google Drive API v3 base, e.g. "/files".
 	BaseDrive = "https://www.googleapis.com/drive/v3"
+
+	// BaseDriveUpload is Drive's separate upload host, used for file uploads
+	// (uploadType=multipart/media); metadata operations use BaseDrive.
+	BaseDriveUpload = "https://www.googleapis.com/upload/drive/v3"
 )
 
 const (
@@ -234,23 +238,74 @@ func (c *Client) GetRaw(ctx context.Context, base, path string, query url.Values
 
 // Post issues a POST to base+path with a JSON-encoded body and returns the raw
 // response body on any 2xx status. A nil body sends no request body. It serves
-// both read-shaped POSTs (e.g. Calendar freeBusy queries) and, from M3, gated
-// mutations. A non-2xx status is decoded into an *Error. The request body is
+// both read-shaped POSTs (e.g. Calendar freeBusy queries) and gated mutations. A
+// non-2xx status is decoded into an *Error. The request body is never logged.
+func (c *Client) Post(ctx context.Context, base, path string, query url.Values, body any) (json.RawMessage, error) {
+	return c.writeJSON(ctx, http.MethodPost, base, path, query, body)
+}
+
+// Patch issues a PATCH to base+path with a JSON-encoded body and returns the raw
+// response body on any 2xx status. Google's PATCH typically returns the updated
+// resource. A non-2xx status is decoded into an *Error. The request body is
 // never logged.
-func (c *Client) Post(ctx context.Context, base, path string, body any) (json.RawMessage, error) {
+func (c *Client) Patch(ctx context.Context, base, path string, query url.Values, body any) (json.RawMessage, error) {
+	return c.writeJSON(ctx, http.MethodPatch, base, path, query, body)
+}
+
+// Delete issues a DELETE to base+path with no request body and returns the raw
+// response body (usually empty, 204 No Content) on any 2xx status. A non-2xx
+// status is decoded into an *Error.
+func (c *Client) Delete(ctx context.Context, base, path string, query url.Values) (json.RawMessage, error) {
+	rawURL, err := c.endpoint(base, path, query)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(ctx, http.MethodDelete, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := statusError(resp); err != nil {
+		return nil, err
+	}
+	return json.RawMessage(resp.body), nil
+}
+
+// PostRaw issues a POST sending body verbatim with the given Content-Type — used
+// for Drive uploads (a multipart or media body against BaseDriveUpload) that are
+// not JSON. It returns the raw response body on any 2xx status; a non-2xx status
+// is decoded into an *Error. The request body is never logged.
+func (c *Client) PostRaw(ctx context.Context, base, path string, query url.Values, contentType string, body []byte) (json.RawMessage, error) {
+	rawURL, err := c.endpoint(base, path, query)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.doRaw(ctx, http.MethodPost, rawURL, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	if err := statusError(resp); err != nil {
+		return nil, err
+	}
+	return json.RawMessage(resp.body), nil
+}
+
+// writeJSON is the shared plumbing behind Post/Patch: it JSON-encodes a non-nil
+// body and issues method against base+path through the retrying transport,
+// returning the raw response body on any 2xx status.
+func (c *Client) writeJSON(ctx context.Context, method, base, path string, query url.Values, body any) (json.RawMessage, error) {
 	var raw []byte
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return nil, fmt.Errorf("encoding POST %s body: %w", path, err)
+			return nil, fmt.Errorf("encoding %s %s body: %w", method, path, err)
 		}
 		raw = b
 	}
-	rawURL, err := c.endpoint(base, path, nil)
+	rawURL, err := c.endpoint(base, path, query)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.do(ctx, http.MethodPost, rawURL, raw)
+	resp, err := c.do(ctx, method, rawURL, raw)
 	if err != nil {
 		return nil, err
 	}
@@ -267,12 +322,17 @@ type response struct {
 	body   []byte
 }
 
-// do issues an authenticated request (method against rawURL, with an optional
-// body) and returns the response, retrying 429/503 and rate-limit 403s per
-// Retry-After (or bounded backoff). A non-nil body is resent on each retry and
-// gets a Content-Type: application/json header. Neither the bearer token nor the
-// request body is ever logged.
+// do issues an authenticated request with an optional JSON body — a thin wrapper
+// over doRaw fixing the Content-Type to application/json.
 func (c *Client) do(ctx context.Context, method, rawURL string, body []byte) (response, error) {
+	return c.doRaw(ctx, method, rawURL, "application/json", body)
+}
+
+// doRaw issues an authenticated request (method against rawURL, with an optional
+// body of the given Content-Type) and returns the response, retrying 429/503 and
+// rate-limit 403s per Retry-After (or bounded backoff). A non-nil body is resent
+// on each retry. Neither the bearer token nor the request body is ever logged.
+func (c *Client) doRaw(ctx context.Context, method, rawURL, contentType string, body []byte) (response, error) {
 	token, err := c.ts.GoogleToken(ctx)
 	if err != nil {
 		return response{}, fmt.Errorf("acquiring Google token: %w", err)
@@ -291,7 +351,7 @@ func (c *Client) do(ctx context.Context, method, rawURL string, body []byte) (re
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Accept", "application/json")
 		if body != nil {
-			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Content-Type", contentType)
 		}
 
 		httpResp, err := c.http.Do(req)

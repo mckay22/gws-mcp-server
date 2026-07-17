@@ -19,16 +19,37 @@ const (
 	// scopeDriveReadonly covers the M2 Drive read tools (list/search, file
 	// content download/export).
 	scopeDriveReadonly = "https://www.googleapis.com/auth/drive.readonly"
+
+	// Write-gated scopes (M3), requested only when --allow-writes is on.
+	// gmail.modify covers draft creation and label changes; calendar.events
+	// covers event mutations; drive (full) covers uploads and — with the send
+	// gate — sharing existing files.
+	scopeGmailModify    = "https://www.googleapis.com/auth/gmail.modify"
+	scopeCalendarEvents = "https://www.googleapis.com/auth/calendar.events"
+	scopeDrive          = "https://www.googleapis.com/auth/drive"
+
+	// Send-gated scope (M3), requested only when --allow-sends is on: sending
+	// mail as the user. (Calendar/Drive send-class actions reuse the write-gated
+	// scopes above; the send gate governs whether they are invoked.)
+	scopeGmailSend = "https://www.googleapis.com/auth/gmail.send"
 )
 
-// requiredScopes returns the OAuth scopes the currently-registered tools need.
-// Reads are always on, so their scopes are always included; gated write/send
-// tools reuse the same read scopes for previews and only need broader scopes
-// once the gates open (handled as those milestones land).
-func requiredScopes(_ config.Config) []string {
-	return []string{
+// requiredScopes returns the OAuth scopes the currently-enabled tools need.
+// Reads are always on, so their scopes are always included. Write/send scopes
+// are requested ONLY when the corresponding gate is open, so a read-only
+// deployment never consents to a mutating scope — least privilege lives here,
+// enforced by Google on every call.
+func requiredScopes(cfg config.Config) []string {
+	scopes := []string{
 		scopeGmailReadonly,
 		scopeCalendarReadonly,
 		scopeDriveReadonly,
 	}
+	if cfg.AllowWrites {
+		scopes = append(scopes, scopeGmailModify, scopeCalendarEvents, scopeDrive)
+	}
+	if cfg.AllowSends {
+		scopes = append(scopes, scopeGmailSend)
+	}
+	return scopes
 }

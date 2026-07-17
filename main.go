@@ -87,9 +87,15 @@ func newMCPServer(cfg config.Config) *mcp.Server {
 		return server
 	}
 	gc := gapi.New(creds)
+	// Reads (always on).
 	registerGmailReadTools(server, gc)
 	registerCalendarReadTools(server, gc)
 	registerDriveReadTools(server, gc)
+	// Writes/sends (registered always; each tool honors the write or send gate,
+	// returning a dry-run preview until its gate is open).
+	registerGmailWriteTools(server, gc, cfg.AllowWrites, cfg.AllowSends)
+	registerCalendarWriteTools(server, gc, cfg.AllowWrites, cfg.AllowSends)
+	registerDriveWriteTools(server, gc, cfg.AllowWrites, cfg.AllowSends)
 	return server
 }
 

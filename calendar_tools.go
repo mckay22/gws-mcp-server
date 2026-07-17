@@ -285,7 +285,7 @@ func registerFreeBusy(server *mcp.Server, gc *gapi.Client) {
 		}
 
 		body := map[string]any{"timeMin": timeMin, "timeMax": timeMax, "items": items}
-		raw, err := gc.Post(ctx, gapi.BaseCalendar, "/freeBusy", body)
+		raw, err := gc.Post(ctx, gapi.BaseCalendar, "/freeBusy", nil, body)
 		if err != nil {
 			return nil, freeBusyOutput{}, toolError(err)
 		}
@@ -308,6 +308,12 @@ func calendarOrPrimary(id string) string {
 		return s
 	}
 	return "primary"
+}
+
+// validRFC3339 reports whether s parses as an RFC3339 timestamp.
+func validRFC3339(s string) bool {
+	_, err := time.Parse(time.RFC3339, strings.TrimSpace(s))
+	return err == nil
 }
 
 // rfc3339OrDefault returns v when it is a valid RFC3339 timestamp, def (UTC,
