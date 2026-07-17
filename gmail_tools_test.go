@@ -116,15 +116,16 @@ func writeJSON(w http.ResponseWriter, status int, body string) {
 	_, _ = w.Write([]byte(body))
 }
 
-// connectGmail wires the Gmail read tools onto an MCP server backed by a real
-// gapi client pointed at the mock, and returns a connected client session.
-func connectGmail(t *testing.T, srv *httptest.Server) *mcp.ClientSession {
+// connectRegistered wires a tool group (via its registrar) onto an MCP server
+// backed by a real gapi client pointed at the mock, and returns a connected
+// client session.
+func connectRegistered(t *testing.T, srv *httptest.Server, register func(*mcp.Server, *gapi.Client)) *mcp.ClientSession {
 	t.Helper()
 	ctx := context.Background()
 	gc := gapi.New(fakeTS{}, gapi.WithBaseURL(srv.URL))
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "t"}, nil)
-	registerGmailReadTools(server, gc)
+	register(server, gc)
 
 	t1, t2 := mcp.NewInMemoryTransports()
 	if _, err := server.Connect(ctx, t1, nil); err != nil {
@@ -136,6 +137,12 @@ func connectGmail(t *testing.T, srv *httptest.Server) *mcp.ClientSession {
 	}
 	t.Cleanup(func() { cs.Close() })
 	return cs
+}
+
+// connectGmail wires the Gmail read tools onto an MCP server backed by the mock.
+func connectGmail(t *testing.T, srv *httptest.Server) *mcp.ClientSession {
+	t.Helper()
+	return connectRegistered(t, srv, registerGmailReadTools)
 }
 
 // callToolErr invokes a tool expecting a tool error, and returns its text.

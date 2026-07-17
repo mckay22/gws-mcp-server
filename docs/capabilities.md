@@ -35,8 +35,30 @@ Scope: `https://www.googleapis.com/auth/gmail.readonly`.
 - Gmail is thread-centric: message summaries carry `threadId` as a first-class
   field.
 
+## Calendar — reads (M2)
+
+Scope: `https://www.googleapis.com/auth/calendar.readonly`.
+
+| Tool | Kind | Description |
+| --- | --- | --- |
+| `list_calendars` | 🟢 | The user's calendar list with ids, access role, and time zone. |
+| `list_events` | 🟢 | Events in a calendar within a time window (default primary calendar, next 30 days), expanded to single instances and ordered by start time. One page; `nextPageToken`. |
+| `get_event` | 🟢 | One event by id, including description and attendee RSVP states. |
+| `freebusy_query` | 🟢 | Busy intervals for one or more calendars in a window (default primary, next 7 days) — availability without event details. |
+
+Time bounds are RFC3339; blank values default, malformed values are rejected.
+
+## Drive — reads (M2)
+
+Scope: `https://www.googleapis.com/auth/drive.readonly`.
+
+| Tool | Kind | Description |
+| --- | --- | --- |
+| `list_files` | 🟢 | List (recent-first) or search files with Drive's query syntax. One page of metadata; `nextPageToken`; optional shared-drive span. Trash excluded by default. |
+| `get_file_content` | 🟢 | A file's text content by id. Google Docs/Sheets/Slides are exported to text/CSV; other files download directly; binary-only files are rejected. Capped at 200 KiB. |
+
 ## Later milestones
 
-Calendar + Drive reads, gated writes/sends, Directory (Admin SDK), governance
-(Reports/audit), the powerful-delegated and powerful-application tiers, and the
-multi-user resource-server mode land in subsequent milestones.
+Gated writes/sends, Directory (Admin SDK), governance (Reports/audit), the
+powerful-delegated and powerful-application tiers, and the multi-user
+resource-server mode land in subsequent milestones.

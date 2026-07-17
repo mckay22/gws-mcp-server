@@ -11,6 +11,14 @@ const (
 	// scopeGmailReadonly covers the M1 Gmail read tools (profile, labels,
 	// message list/search/get).
 	scopeGmailReadonly = "https://www.googleapis.com/auth/gmail.readonly"
+
+	// scopeCalendarReadonly covers the M2 Calendar read tools (calendars,
+	// events, free/busy).
+	scopeCalendarReadonly = "https://www.googleapis.com/auth/calendar.readonly"
+
+	// scopeDriveReadonly covers the M2 Drive read tools (list/search, file
+	// content download/export).
+	scopeDriveReadonly = "https://www.googleapis.com/auth/drive.readonly"
 )
 
 // requiredScopes returns the OAuth scopes the currently-registered tools need.
@@ -20,5 +28,7 @@ const (
 func requiredScopes(_ config.Config) []string {
 	return []string{
 		scopeGmailReadonly,
+		scopeCalendarReadonly,
+		scopeDriveReadonly,
 	}
 }

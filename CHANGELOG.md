@@ -8,6 +8,23 @@ by milestone.
 
 ### Added
 
+- **M2 — Calendar + Drive reads.** Four Calendar tools (`list_calendars`,
+  `list_events`, `get_event`, `freebusy_query`) and two Drive tools
+  (`list_files`, `get_file_content`), all acting as the signed-in user. Events
+  are windowed (RFC3339 bounds, blank defaults to now / +30 days, malformed
+  rejected), expanded with `singleEvents=true` and ordered by start time, one
+  bounded page with `nextPageToken`. `freebusy_query` returns availability
+  without event details. `list_files` takes Drive's search syntax (recent-first
+  default), excludes trash by default, and can span shared drives;
+  `get_file_content` exports Google Docs/Sheets/Slides to text/CSV, downloads
+  other files directly, rejects text-less binaries, and caps output at 200 KiB.
+  Client gains `Post` (JSON body → raw JSON, backing the free/busy read and
+  future mutations) and `GetRaw` (raw bytes + Content-Type, backing Drive
+  media/export downloads), plus `BaseCalendar`/`BaseDrive`. Scopes add
+  `calendar.readonly` and `drive.readonly`. Recording-mock tests cover every
+  tool including window defaulting, query wiring, export-vs-download routing,
+  and not-found/validation paths. No new dependencies.
+
 - **M1 — classic-delegated mode + Gmail reads.** Installed-app OAuth sign-in
   (`internal/googleauth`): loopback redirect + PKCE (S256), CSRF-checked state,
   offline access for a refresh token, authorization URL to stderr with

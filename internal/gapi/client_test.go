@@ -3,6 +3,7 @@ package gapi
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -197,6 +198,86 @@ func TestRetryOnRateLimit403(t *testing.T) {
 	}
 	if attempts != 2 {
 		t.Errorf("attempts = %d, want 2 (rate-limit 403 is retried)", attempts)
+	}
+}
+
+func TestPostSendsJSONBody(t *testing.T) {
+	var gotMethod, gotBody, gotContentType string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotContentType = r.Header.Get("Content-Type")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		_, _ = w.Write([]byte(`{"calendars":{"primary":{"busy":[]}}}`))
+	}))
+	defer srv.Close()
+
+	c := newClient(t, srv, staticToken{token: "t"})
+	raw, err := c.Post(context.Background(), BaseCalendar, "/freeBusy", map[string]any{"timeMin": "2026-01-01T00:00:00Z"})
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotContentType != "application/json" {
+		t.Errorf("content-type = %q, want application/json", gotContentType)
+	}
+	if !strings.Contains(gotBody, `"timeMin":"2026-01-01T00:00:00Z"`) {
+		t.Errorf("body = %q", gotBody)
+	}
+	if !strings.Contains(string(raw), "busy") {
+		t.Errorf("response = %s", raw)
+	}
+}
+
+func TestPostDecodesError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":400,"message":"Bad Request","status":"INVALID_ARGUMENT"}}`))
+	}))
+	defer srv.Close()
+
+	c := newClient(t, srv, staticToken{token: "t"})
+	_, err := c.Post(context.Background(), BaseCalendar, "/freeBusy", map[string]any{})
+	var ge *Error
+	if !errors.As(err, &ge) || ge.Status != 400 || ge.Reason != "INVALID_ARGUMENT" {
+		t.Fatalf("error = %v, want decoded 400 INVALID_ARGUMENT", err)
+	}
+}
+
+func TestGetRawReturnsBytesAndContentType(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("exported document text"))
+	}))
+	defer srv.Close()
+
+	c := newClient(t, srv, staticToken{token: "t"})
+	body, ct, err := c.GetRaw(context.Background(), BaseDrive, "/files/abc/export", url.Values{"mimeType": {"text/plain"}})
+	if err != nil {
+		t.Fatalf("GetRaw: %v", err)
+	}
+	if string(body) != "exported document text" {
+		t.Errorf("body = %q", body)
+	}
+	if !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("content-type = %q, want text/plain", ct)
+	}
+}
+
+func TestGetRawDecodesError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"code":403,"message":"The user does not have sufficient permissions.","status":"PERMISSION_DENIED"}}`))
+	}))
+	defer srv.Close()
+
+	c := newClient(t, srv, staticToken{token: "t"})
+	_, _, err := c.GetRaw(context.Background(), BaseDrive, "/files/abc", url.Values{"alt": {"media"}})
+	var ge *Error
+	if !errors.As(err, &ge) || ge.Status != 403 {
+		t.Fatalf("error = %v, want decoded 403", err)
 	}
 }
 

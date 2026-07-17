@@ -36,6 +36,13 @@ const (
 	// BaseGmail is the Gmail API v1 base. Resource paths are user-scoped, e.g.
 	// "/users/me/profile".
 	BaseGmail = "https://gmail.googleapis.com/gmail/v1"
+
+	// BaseCalendar is the Google Calendar API v3 base, e.g.
+	// "/users/me/calendarList" or "/calendars/{id}/events".
+	BaseCalendar = "https://www.googleapis.com/calendar/v3"
+
+	// BaseDrive is the Google Drive API v3 base, e.g. "/files".
+	BaseDrive = "https://www.googleapis.com/drive/v3"
 )
 
 const (
@@ -204,6 +211,53 @@ func (c *Client) List(ctx context.Context, base, path string, query url.Values, 
 		}
 		q.Set("pageToken", nextToken)
 	}
+}
+
+// GetRaw fetches base+path and returns the response body verbatim (not decoded
+// as JSON) along with its Content-Type, on any 2xx status. It backs media
+// downloads and exports (Drive alt=media / files.export) that return file bytes
+// rather than JSON. A non-2xx status is decoded into an *Error.
+func (c *Client) GetRaw(ctx context.Context, base, path string, query url.Values) ([]byte, string, error) {
+	rawURL, err := c.endpoint(base, path, query)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := c.do(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := statusError(resp); err != nil {
+		return nil, "", err
+	}
+	return resp.body, resp.header.Get("Content-Type"), nil
+}
+
+// Post issues a POST to base+path with a JSON-encoded body and returns the raw
+// response body on any 2xx status. A nil body sends no request body. It serves
+// both read-shaped POSTs (e.g. Calendar freeBusy queries) and, from M3, gated
+// mutations. A non-2xx status is decoded into an *Error. The request body is
+// never logged.
+func (c *Client) Post(ctx context.Context, base, path string, body any) (json.RawMessage, error) {
+	var raw []byte
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("encoding POST %s body: %w", path, err)
+		}
+		raw = b
+	}
+	rawURL, err := c.endpoint(base, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(ctx, http.MethodPost, rawURL, raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := statusError(resp); err != nil {
+		return nil, err
+	}
+	return json.RawMessage(resp.body), nil
 }
 
 // response is the subset of an HTTP response the client acts on.

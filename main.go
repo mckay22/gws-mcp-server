@@ -86,7 +86,10 @@ func newMCPServer(cfg config.Config) *mcp.Server {
 		slog.Warn("Gmail tools disabled until credentials are configured", "reason", err)
 		return server
 	}
-	registerGmailReadTools(server, gapi.New(creds))
+	gc := gapi.New(creds)
+	registerGmailReadTools(server, gc)
+	registerCalendarReadTools(server, gc)
+	registerDriveReadTools(server, gc)
 	return server
 }
 
