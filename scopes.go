@@ -38,6 +38,18 @@ const (
 	scopeAdminGroupReadonly    = "https://www.googleapis.com/auth/admin.directory.group.readonly"
 	scopeAdminGroupMemberRO    = "https://www.googleapis.com/auth/admin.directory.group.member.readonly"
 	scopeAdminRoleMgmtReadonly = "https://www.googleapis.com/auth/admin.directory.rolemanagement.readonly"
+
+	// Governance read scopes (M6), requested when --admin is on: audit reports,
+	// a user's connected-app tokens (user.security), and license assignments.
+	scopeReportsAudit  = "https://www.googleapis.com/auth/admin.reports.audit.readonly"
+	scopeUserSecurity  = "https://www.googleapis.com/auth/admin.directory.user.security"
+	scopeAppsLicensing = "https://www.googleapis.com/auth/apps.licensing"
+
+	// Admin write scopes (M6), requested only when --admin AND --allow-writes are
+	// both on: the read-write directory scopes for user/group lifecycle.
+	scopeAdminUser        = "https://www.googleapis.com/auth/admin.directory.user"
+	scopeAdminGroup       = "https://www.googleapis.com/auth/admin.directory.group"
+	scopeAdminGroupMember = "https://www.googleapis.com/auth/admin.directory.group.member"
 )
 
 // requiredScopes returns the OAuth scopes the currently-enabled tools need.
@@ -63,7 +75,16 @@ func requiredScopes(cfg config.Config) []string {
 			scopeAdminGroupReadonly,
 			scopeAdminGroupMemberRO,
 			scopeAdminRoleMgmtReadonly,
+			// Governance reads (M6).
+			scopeReportsAudit,
+			scopeUserSecurity,
+			scopeAppsLicensing,
 		)
+		if cfg.AllowWrites {
+			// Directory write lifecycle (M6): the read-write directory scopes,
+			// requested only when both the admin switch and the write gate are on.
+			scopes = append(scopes, scopeAdminUser, scopeAdminGroup, scopeAdminGroupMember)
+		}
 	}
 	return scopes
 }

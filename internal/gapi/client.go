@@ -51,6 +51,14 @@ const (
 	// BaseDirectory is the Admin SDK Directory API v1 base, e.g. "/users" or
 	// "/groups/{key}/members".
 	BaseDirectory = "https://admin.googleapis.com/admin/directory/v1"
+
+	// BaseReports is the Admin SDK Reports API v1 base (audit activities), e.g.
+	// "/activity/users/{key}/applications/{app}".
+	BaseReports = "https://admin.googleapis.com/admin/reports/v1"
+
+	// BaseLicensing is the Enterprise License Manager API v1 base, e.g.
+	// "/product/{productId}/users".
+	BaseLicensing = "https://licensing.googleapis.com/apps/licensing/v1"
 )
 
 const (

@@ -8,6 +8,25 @@ by milestone.
 
 ### Added
 
+- **M6 — governance (audit, connected-app & license reads; Directory writes).**
+  Three read tools (register under `--admin`): `audit_activities` (Reports API
+  activity log for login/admin/drive/token/… with time/actor/IP, RFC3339 bounds
+  validated, edition-gated apps erroring cleanly), `user_connected_apps`
+  (Directory `tokens.list` — the connected-app/consent audit with granted
+  scopes), and `license_assignments` (Enterprise License Manager, per
+  product/SKU). Six write tools (register under `--admin`, ride the write gate):
+  `directory_user_create` (password **redacted** in preview via PreviewBody while
+  ApplyBody carries the real value), `directory_user_update`,
+  `directory_user_suspend`, `directory_group_create`,
+  `directory_group_add_member`, `directory_group_remove_member`. Scopes:
+  `admin.reports.audit.readonly`, `admin.directory.user.security`,
+  `apps.licensing` added under `--admin`; the read-write directory scopes
+  (`admin.directory.user`/`group`/`group.member`) only under `--admin` AND
+  `--allow-writes`. `BaseReports`/`BaseLicensing` added. Recording-mock tests
+  cover the governance reads (query wiring, validation) and the directory writes
+  (password never leaks in preview or applied output, the wire carries it, gate
+  and role validation, DELETE path). No new dependencies.
+
 - **M5 — resource-server mode.** A multi-user HTTP transport (`--http <addr>`
   with `GWS_AUDIENCE`) that validates each request's bearer token and acts as the
   mapped caller. New generic OIDC verifier (`internal/oidcauth`): issuer-agnostic

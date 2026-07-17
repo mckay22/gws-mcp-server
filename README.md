@@ -18,17 +18,18 @@ built to the same principles:
   called over plain `net/http` with `fields` projection — no generated API
   clients, minimal PII in model context.
 
-> **Status: M5 (reads + gated writes/sends + Directory + resource-server mode).**
-> Signs you in with your own Google account (installed-app OAuth: loopback +
-> PKCE) and acts as you across Gmail, Calendar, and Drive: reads by default,
-> gated mutations behind `--allow-writes`, and irreversible/egress actions behind
-> a separate `--allow-sends` (dry-run previews until a gate opens). Admin SDK
-> Directory reads behind `--admin`. Also runs as a **multi-user resource server**
-> (`--http`): it validates each request's bearer token against any OIDC IdP
-> (Keycloak, Entra, Google) and acts as the mapped caller via domain-wide
-> delegation. See [docs/auth.md](docs/auth.md) for the identity model and
-> [docs/capabilities.md](docs/capabilities.md) for the tools. Next: governance
-> (audit/Reports, Directory writes) and the powerful tiers.
+> **Status: M6 (reads + gated writes/sends + Directory + governance +
+> resource-server mode).** Signs you in with your own Google account
+> (installed-app OAuth: loopback + PKCE) and acts as you across Gmail, Calendar,
+> and Drive: reads by default, gated mutations behind `--allow-writes`, and
+> irreversible/egress actions behind a separate `--allow-sends` (dry-run previews
+> until a gate opens). Behind `--admin`: Admin SDK Directory reads/writes, audit
+> log (Reports), connected-app and license audit. Also runs as a **multi-user
+> resource server** (`--http`): it validates each request's bearer token against
+> any OIDC IdP (Keycloak, Entra, Google) and acts as the mapped caller via
+> domain-wide delegation. See [docs/auth.md](docs/auth.md) for the identity model
+> and [docs/capabilities.md](docs/capabilities.md) for the tools. Next: the
+> powerful-delegated and powerful-application tiers.
 
 ## Running (classic-delegated mode)
 

@@ -116,9 +116,13 @@ func registerTools(server *mcp.Server, gc *gapi.Client, cfg config.Config) {
 	registerGmailWriteTools(server, gc, cfg.AllowWrites, cfg.AllowSends)
 	registerCalendarWriteTools(server, gc, cfg.AllowWrites, cfg.AllowSends)
 	registerDriveWriteTools(server, gc, cfg.AllowWrites, cfg.AllowSends)
-	// Admin SDK Directory reads (opt-in registration via --admin).
+	// Admin SDK tools (opt-in registration via --admin): Directory reads,
+	// governance reads (audit/tokens/licenses), and Directory writes (the write
+	// tools honor the write gate).
 	if cfg.Admin {
 		registerDirectoryReadTools(server, gc)
+		registerGovernanceReadTools(server, gc)
+		registerDirectoryWriteTools(server, gc, cfg.AllowWrites, cfg.AllowSends)
 	}
 }
 

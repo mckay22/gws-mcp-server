@@ -101,6 +101,25 @@ switch off. Google enforces the caller's admin privileges on every call.
 | `directory_roles_list` | 🟢 | Admin roles (system + custom), flagging super-admin. |
 | `directory_role_assignments` | 🟢 | Who holds which admin role, filterable by user or role id. |
 
+## Governance (M6, Admin SDK)
+
+Also behind `--admin`. Reads need reporting/security/licensing admin privileges;
+the Directory write tools additionally honor `--allow-writes` (dry-run preview
+until open). Edition-gated audit event types and license queries surface the
+Google error cleanly.
+
+| Tool | Kind | Description |
+| --- | --- | --- |
+| `audit_activities` | 🟢 | Admin Reports audit log for an application (login/admin/drive/token/…): who did what, when, from where. |
+| `user_connected_apps` | 🟢 | The third-party OAuth apps a user has granted access to, with scopes — the connected-app/consent audit. |
+| `license_assignments` | 🟢 | License assignments for a product/SKU across users (Enterprise License Manager). |
+| `directory_user_create` | 🟡 | Create a user (password **redacted** in the preview). |
+| `directory_user_update` | 🟡 | Patch a user's name / org unit. |
+| `directory_user_suspend` | 🟡 | Suspend or un-suspend a user. |
+| `directory_group_create` | 🟡 | Create a group. |
+| `directory_group_add_member` | 🟡 | Add a member with a role. |
+| `directory_group_remove_member` | 🟡 | Remove a member. |
+
 ## Resource-server mode (M5)
 
 The same tool surface is also served over HTTP in multi-user mode (`--http
