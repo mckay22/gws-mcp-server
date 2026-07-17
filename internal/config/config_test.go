@@ -75,6 +75,53 @@ func TestMode(t *testing.T) {
 	if got := (Config{}).Mode(); got != ModeClassicDelegated {
 		t.Errorf("Mode() = %q, want %q", got, ModeClassicDelegated)
 	}
+	rs := Config{Audience: "api://gws"}
+	if got := rs.Mode(); got != ModeResourceServer {
+		t.Errorf("Mode() = %q, want %q when audience set", got, ModeResourceServer)
+	}
+	if !rs.ResourceServerMode() {
+		t.Error("ResourceServerMode() = false, want true when audience set")
+	}
+}
+
+func TestRequireResourceServer(t *testing.T) {
+	// Missing everything → error naming all three.
+	err := Config{}.RequireResourceServer()
+	if err == nil {
+		t.Fatal("expected error with no resource-server config")
+	}
+	for _, want := range []string{EnvAudience, EnvIssuers, EnvDWDKeyPath} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %s", err, want)
+		}
+	}
+	// Fully configured → nil.
+	ok := Config{
+		Audience:       "api://gws",
+		AllowedIssuers: []string{"https://issuer.example.com"},
+		DWDKeyPath:     "/keys/sa.json",
+	}
+	if err := ok.RequireResourceServer(); err != nil {
+		t.Errorf("unexpected error with full config: %v", err)
+	}
+}
+
+func TestSubjectClaimOrDefault(t *testing.T) {
+	if got := (Config{}).SubjectClaimOrDefault(); got != DefaultSubjectClaim {
+		t.Errorf("SubjectClaimOrDefault() = %q, want %q", got, DefaultSubjectClaim)
+	}
+	if got := (Config{SubjectClaim: "preferred_username"}).SubjectClaimOrDefault(); got != "preferred_username" {
+		t.Errorf("SubjectClaimOrDefault() = %q, want the configured claim", got)
+	}
+}
+
+func TestDWDKeyPresence(t *testing.T) {
+	if (Config{}).Presence().DWDKey {
+		t.Error("DWDKey presence should be false when unset")
+	}
+	if !(Config{DWDKeyPath: "/keys/sa.json"}).Presence().DWDKey {
+		t.Error("DWDKey presence should be true when path set")
+	}
 }
 
 func TestRedact(t *testing.T) {

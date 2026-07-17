@@ -101,8 +101,15 @@ switch off. Google enforces the caller's admin privileges on every call.
 | `directory_roles_list` | 🟢 | Admin roles (system + custom), flagging super-admin. |
 | `directory_role_assignments` | 🟢 | Who holds which admin role, filterable by user or role id. |
 
+## Resource-server mode (M5)
+
+The same tool surface is also served over HTTP in multi-user mode (`--http
+<addr>` with `GWS_AUDIENCE` set): each request's bearer token is verified against
+a trusted OIDC issuer, mapped to a Google user, and impersonated via domain-wide
+delegation. See [auth.md](auth.md) for the identity model. The tool inventory is
+identical to stdio mode; only the identity backend changes.
+
 ## Later milestones
 
-Governance (Reports/audit, Directory writes), the powerful-delegated and
-powerful-application tiers, and the multi-user resource-server mode land in
-subsequent milestones.
+Governance (Reports/audit, Directory writes), and the powerful-delegated and
+powerful-application tiers land in subsequent milestones.

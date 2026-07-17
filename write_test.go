@@ -198,7 +198,6 @@ func TestRunWriteApplyBodyOverridesWireForm(t *testing.T) {
 
 func TestRunWriteSurfacesError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
 		writeJSON(w, http.StatusForbidden, `{"error":{"code":403,"message":"denied","status":"PERMISSION_DENIED"}}`)
 	}))
 	defer srv.Close()

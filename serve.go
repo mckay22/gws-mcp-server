@@ -1,0 +1,236 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/mckay22/gws-mcp-server/internal/config"
+	"github.com/mckay22/gws-mcp-server/internal/gapi"
+	"github.com/mckay22/gws-mcp-server/internal/googleauth"
+	"github.com/mckay22/gws-mcp-server/internal/oidcauth"
+	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// serveHTTP runs the resource-server MCP transport over streamable HTTP at /mcp.
+//
+// This is the multi-user mode: every request must carry a bearer token minted for
+// this server (audience = cfg.Audience) by a trusted OIDC issuer (cfg.Issuers()).
+// The token is validated against the issuer's JWKS, mapped to a Google user via
+// the configured claim, and that user is impersonated through the domain-wide
+// delegation (DWD) backend so each tool calls Google as that caller. Google, not
+// this server, remains the authority on what the caller may do. Because every
+// request is authenticated, binding a network-reachable address is allowed.
+//
+// The caller owns the lifecycle: serveHTTP shuts down gracefully when ctx is
+// cancelled (the main thread wires ctx to os.Interrupt).
+func serveHTTP(ctx context.Context, addr string, cfg config.Config) error {
+	if err := cfg.RequireResourceServer(); err != nil {
+		return err
+	}
+
+	verifier, err := oidcauth.NewVerifier(ctx, cfg.Issuers(), cfg.Audience, cfg.SubjectClaimOrDefault())
+	if err != nil {
+		return fmt.Errorf("configuring OIDC token verifier: %w", err)
+	}
+
+	// One Google client serves every caller: the DWD token source reads the
+	// per-request impersonation target from the context (userMiddleware puts it
+	// there), so a single client acts as whichever user made the call without
+	// leaking tokens between them.
+	dwd, err := googleauth.NewDWD(cfg.DWDKeyPath, requiredScopes(cfg))
+	if err != nil {
+		return fmt.Errorf("configuring DWD identity backend: %w", err)
+	}
+	gc := gapi.New(dwd)
+
+	bind, err := resolveBindAddr(addr, cfg.ResourceServerMode())
+	if err != nil {
+		return err
+	}
+
+	httpServer := &http.Server{
+		Addr:              bind,
+		Handler:           mcpHTTPHandler(cfg, verifier, gc),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	// Shut down gracefully when the caller's context is cancelled (signal).
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = httpServer.Shutdown(shutdownCtx)
+	}()
+
+	// Diagnostics go to stderr. The audience is public (it is published in the
+	// resource metadata); no secret is logged.
+	slog.Info("starting",
+		"server", serverName,
+		"version", version,
+		"transport", "http",
+		"endpoint", "http://"+bind+"/mcp",
+		"mode", config.ModeResourceServer,
+		"audience", cfg.Audience,
+		"issuers", len(cfg.Issuers()),
+		"subjectClaim", cfg.SubjectClaimOrDefault(),
+		"dwdKey", cfg.Presence().DWDKey,
+	)
+	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// mcpHTTPHandler builds the resource-server HTTP handler: the streamable MCP
+// endpoint at /mcp guarded by bearer-token verification, plus the RFC 9728
+// Protected Resource Metadata document at /.well-known/oauth-protected-resource.
+//
+// Every /mcp request is verified (bearerVerifier); the verified caller's mapped
+// Google user is then carried into each tool call's context (userMiddleware) so
+// the DWD backend impersonates that user. The metadata endpoint is deliberately
+// unauthenticated so a client can discover where to obtain a token.
+func mcpHTTPHandler(cfg config.Config, verifier *oidcauth.Verifier, gc *gapi.Client) http.Handler {
+	server := mcp.NewServer(&mcp.Implementation{Name: serverName, Version: version}, nil)
+	registerHealth(server, cfg, "http")
+	registerTools(server, gc, cfg)
+	server.AddReceivingMiddleware(userMiddleware)
+
+	streamable := mcp.NewStreamableHTTPHandler(
+		func(*http.Request) *mcp.Server { return server },
+		&mcp.StreamableHTTPOptions{
+			SessionTimeout: 5 * time.Minute,
+			Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		},
+	)
+
+	handler := sdkauth.RequireBearerToken(bearerVerifier(verifier), nil)(streamable)
+
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", handler)
+	mux.Handle("/mcp/", handler)
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource", resourceMetadataHandler(cfg))
+	return mux
+}
+
+// userKey is the TokenInfo.Extra key under which bearerVerifier stashes the
+// caller's mapped Google user for userMiddleware to lift into the request
+// context.
+const userKey = "googleUser"
+
+// bearerVerifier verifies an incoming bearer token and, on success, returns the
+// TokenInfo the transport binds to the session. The mapped Google user is stashed
+// in Extra so userMiddleware can hand it to the DWD backend. Any verification
+// failure is wrapped as ErrInvalidToken, which the SDK surfaces as a 401. A token
+// that verifies but carries no mappable user claim is rejected — there is no
+// caller to act as.
+func bearerVerifier(v *oidcauth.Verifier) sdkauth.TokenVerifier {
+	return func(ctx context.Context, rawToken string, _ *http.Request) (*sdkauth.TokenInfo, error) {
+		claims, err := v.Verify(ctx, rawToken)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", sdkauth.ErrInvalidToken, err)
+		}
+		if claims.GoogleUser == "" {
+			return nil, fmt.Errorf("%w: token has no mappable user claim", sdkauth.ErrInvalidToken)
+		}
+		return &sdkauth.TokenInfo{
+			// UserID binds the session to this subject so the transport rejects a
+			// different user's token reusing the session (hijack prevention).
+			UserID:     claims.Subject,
+			Expiration: claims.Expiry,
+			Extra: map[string]any{
+				userKey: claims.GoogleUser,
+			},
+		}, nil
+	}
+}
+
+// userMiddleware copies the verified caller's mapped Google user from the
+// per-request TokenInfo into the context, so the DWD backend impersonates that
+// user. With no token on the request (there is none in stdio mode) it is a no-op,
+// so the same tool code serves both modes unchanged.
+func userMiddleware(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		if extra := req.GetExtra(); extra != nil && extra.TokenInfo != nil {
+			if u, ok := extra.TokenInfo.Extra[userKey].(string); ok {
+				ctx = googleauth.WithUser(ctx, u)
+			}
+		}
+		return next(ctx, method, req)
+	}
+}
+
+// resourceScopes is advertised in the RFC 9728 scopes_supported field: the
+// conventional "act as the signed-in user" scope. It is informational — this
+// server enforces access through token validation and Google, never a local
+// scope check.
+var resourceScopes = []string{"access_as_user"}
+
+// resourceMetadataHandler serves the RFC 9728 Protected Resource Metadata
+// document describing this server as an OAuth 2.0 protected resource: the resource
+// identifier (the audience tokens must be minted for) and the authorization
+// servers (issuers) whose tokens it accepts. It carries no secret and needs no
+// authentication.
+func resourceMetadataHandler(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"resource":                 cfg.Audience,
+			"authorization_servers":    cfg.Issuers(),
+			"bearer_methods_supported": []string{"header"},
+			"scopes_supported":         resourceScopes,
+		})
+	}
+}
+
+// resolveBindAddr normalizes a --http bind address. A missing host defaults to
+// 127.0.0.1. A non-loopback host is rejected unless allowNonLoopback is set
+// (which happens only in resource-server mode, where every request is
+// authenticated).
+func resolveBindAddr(addr string, allowNonLoopback bool) (string, error) {
+	a := strings.TrimSpace(addr)
+	if a == "" {
+		return "", fmt.Errorf("empty --http address")
+	}
+	// Allow a bare port (e.g. "8080").
+	if !strings.Contains(a, ":") {
+		a = ":" + a
+	}
+
+	host, port, err := net.SplitHostPort(a)
+	if err != nil {
+		return "", fmt.Errorf("invalid --http address %q: %w", addr, err)
+	}
+	if port == "" {
+		return "", fmt.Errorf("invalid --http address %q: missing port", addr)
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if !isLoopbackHost(host) && !allowNonLoopback {
+		return "", fmt.Errorf(
+			"refusing to bind --http to non-loopback host %q: HTTP has no per-request authentication "+
+				"unless resource-server mode is configured (%s + %s); otherwise use 127.0.0.1, ::1, or localhost",
+			host, config.EnvAudience, config.EnvIssuers)
+	}
+	return net.JoinHostPort(host, port), nil
+}
+
+// isLoopbackHost reports whether host is a loopback address or "localhost".
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}

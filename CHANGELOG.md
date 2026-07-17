@@ -8,6 +8,35 @@ by milestone.
 
 ### Added
 
+- **M5 — resource-server mode.** A multi-user HTTP transport (`--http <addr>`
+  with `GWS_AUDIENCE`) that validates each request's bearer token and acts as the
+  mapped caller. New generic OIDC verifier (`internal/oidcauth`): issuer-agnostic
+  (Keycloak / Entra / Google, any OIDC IdP), discovering each trusted issuer's
+  metadata + JWKS and checking signature, issuer allowlist, audience, and expiry
+  — a generalization of the sibling's tenant-specific verifier, mapping the
+  caller through a configurable claim (`GWS_SUBJECT_CLAIM`, default `email`). New
+  DWD identity backend (`internal/googleauth` `DWD`): the Google analog of the
+  On-Behalf-Of exchange — mints a service-account-signed JWT with `sub=<verified
+  user>` (domain-wide delegation) and caches a refreshing token source per user.
+  `serve.go` wires the streamable HTTP handler behind bearer verification, lifts
+  the mapped user into each call's context, publishes RFC 9728 Protected Resource
+  Metadata, and refuses a non-loopback bind unless resource-server mode is
+  configured. Tool registration is factored into one `registerTools` shared by
+  both transports, so the surface is identical across modes; health reports the
+  real transport. Config gains `GWS_AUDIENCE` / `GWS_ISSUERS` / `GWS_DWD_SA_KEY`
+  / `GWS_SUBJECT_CLAIM`, `ResourceServerMode`, `RequireResourceServer`, and DWD
+  key presence. The linked-token backend (tier 2b) is designed with a store
+  schema in docs/auth.md; implementation is deferred (M5b). Tests: the verifier
+  against a fake issuer with real RS256 signing (valid/expired/wrong-audience/
+  wrong-issuer/absent-claim), DWD per-user impersonation and caching, bind-address
+  rules, the metadata document, and a full HTTP integration test (401 without a
+  token, wrong-audience rejected, and an authenticated `health` call over the
+  streamable transport reporting resource-server mode). New dependencies:
+  `github.com/coreos/go-oidc/v3` (+ `github.com/go-jose/go-jose/v4`) for OIDC
+  discovery / JWKS / JWT verification, and `golang.org/x/oauth2/google` (+
+  `/jwt`) for domain-wide-delegation service-account JWT signing — both foreseen
+  in PLAN.md; hand-rolling JWT/JWKS crypto is inadvisable. docs/auth.md added.
+
 - **M4 — Directory reads (Admin SDK).** Six read-only Directory tools:
   `directory_users_search`, `directory_user_get`, `directory_groups_search`,
   `directory_group_members`, `directory_roles_list`, and

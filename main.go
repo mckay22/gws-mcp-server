@@ -34,6 +34,7 @@ func main() {
 
 // run parses flags, builds the server, and serves stdio until interrupted.
 func run() error {
+	httpAddr := flag.String("http", "", "serve over streamable HTTP at this address (resource-server mode; requires GWS_AUDIENCE, GWS_ISSUERS, GWS_DWD_SA_KEY). Default is stdio (classic-delegated).")
 	allowWrites := flag.Bool("allow-writes", false, "enable the write tools (mutations); off = dry-run previews. Also settable via GWS_MCP_ALLOW_WRITES=true.")
 	allowSends := flag.Bool("allow-sends", false, "enable send-class tools (irreversible: mail send, sharing); off = dry-run previews. Separate from --allow-writes. Also GWS_MCP_ALLOW_SENDS=true.")
 	admin := flag.Bool("admin", false, "register the Admin SDK Directory tools and request admin.directory.*.readonly scopes; only useful when the signed-in user is an admin. Also GWS_MCP_ADMIN=true.")
@@ -57,6 +58,11 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	if *httpAddr != "" {
+		// Resource-server mode: serveHTTP validates config, binds, and logs.
+		return serveHTTP(ctx, *httpAddr, cfg)
+	}
+
 	// Startup line: name/version, mode, and config readiness — presence booleans
 	// only, never any secret value.
 	p := cfg.Presence()
@@ -67,6 +73,7 @@ func run() error {
 		"mode", cfg.Mode(),
 		"writes", cfg.AllowWrites,
 		"sends", cfg.AllowSends,
+		"admin", cfg.Admin,
 		"clientId", p.ClientID,
 		"clientSecret", p.ClientSecret,
 	)
@@ -82,7 +89,7 @@ func run() error {
 // it happens on the first Gmail tool call, never here.
 func newMCPServer(cfg config.Config) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: serverName, Version: version}, nil)
-	registerHealth(server, cfg)
+	registerHealth(server, cfg, "stdio")
 
 	creds, err := googleauth.NewPersonal(cfg, requiredScopes(cfg))
 	if err != nil {
@@ -90,7 +97,16 @@ func newMCPServer(cfg config.Config) *mcp.Server {
 		slog.Warn("Gmail tools disabled until credentials are configured", "reason", err)
 		return server
 	}
-	gc := gapi.New(creds)
+	registerTools(server, gapi.New(creds), cfg)
+	return server
+}
+
+// registerTools installs every Google-backed tool on the server: the read tools
+// (always on), the write/send tools (registered always, each honoring its gate),
+// and the Admin SDK Directory reads (only when --admin). Both transports — stdio
+// (classic-delegated) and HTTP (resource-server) — call it against their own
+// gapi.Client, so the tool surface is identical across modes.
+func registerTools(server *mcp.Server, gc *gapi.Client, cfg config.Config) {
 	// Reads (always on).
 	registerGmailReadTools(server, gc)
 	registerCalendarReadTools(server, gc)
@@ -104,7 +120,6 @@ func newMCPServer(cfg config.Config) *mcp.Server {
 	if cfg.Admin {
 		registerDirectoryReadTools(server, gc)
 	}
-	return server
 }
 
 // healthInput has no fields: health takes no arguments.
@@ -124,7 +139,7 @@ type healthOutput struct {
 	Config    config.Presence `json:"config" jsonschema:"which GWS_* variables are set (booleans only)"`
 }
 
-func registerHealth(server *mcp.Server, cfg config.Config) {
+func registerHealth(server *mcp.Server, cfg config.Config, transport string) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "health",
 		Title:       "Health check",
@@ -134,7 +149,7 @@ func registerHealth(server *mcp.Server, cfg config.Config) {
 		out := healthOutput{
 			Server:    serverName,
 			Version:   version,
-			Transport: "stdio",
+			Transport: transport,
 			Mode:      cfg.Mode(),
 			Writes:    cfg.AllowWrites,
 			Sends:     cfg.AllowSends,
@@ -142,8 +157,8 @@ func registerHealth(server *mcp.Server, cfg config.Config) {
 			Config:    p,
 		}
 		summary := fmt.Sprintf(
-			"%s %s ok (transport stdio, mode %s, writes=%t sends=%t admin=%t; config: clientId=%t clientSecret=%t).",
-			serverName, version, out.Mode, out.Writes, out.Sends, out.Admin, p.ClientID, p.ClientSecret)
+			"%s %s ok (transport %s, mode %s, writes=%t sends=%t admin=%t; config: clientId=%t clientSecret=%t).",
+			serverName, version, out.Transport, out.Mode, out.Writes, out.Sends, out.Admin, p.ClientID, p.ClientSecret)
 		return text(summary), out, nil
 	})
 }

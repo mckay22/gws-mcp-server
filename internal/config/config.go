@@ -45,7 +45,38 @@ const (
 	// Unset or anything other than "true" (case-insensitive) leaves the directory
 	// tools unregistered and their scopes unrequested.
 	EnvAdmin = "GWS_MCP_ADMIN"
+
+	// EnvAudience is the audience that incoming bearer tokens must be minted for
+	// in resource-server mode (this server's identifier). Serving over --http
+	// requires it. It carries no secret.
+	EnvAudience = "GWS_AUDIENCE"
+
+	// EnvIssuers is a comma-separated allowlist of trusted OIDC issuer URLs whose
+	// tokens the resource-server verifier accepts (e.g. a Keycloak realm, an Entra
+	// tenant v2.0 issuer, or Google's accounts issuer). The verifier is
+	// issuer-agnostic: each issuer's OIDC metadata (and JWKS) is discovered.
+	EnvIssuers = "GWS_ISSUERS"
+
+	// EnvDWDKeyPath is the filesystem path to the domain-wide-delegation service
+	// account's JSON key. The key is a domain credential (it can mint tokens as
+	// any user in the domain within the DWD-granted scopes), so it is provided by
+	// path at runtime, loaded outside the repo, and never logged. Its presence is
+	// reported as a boolean only.
+	EnvDWDKeyPath = "GWS_DWD_SA_KEY"
+
+	// EnvSubjectClaim is the verified-token claim mapped to the Google user the
+	// DWD backend impersonates (the minted JWT's sub). Default "email".
+	EnvSubjectClaim = "GWS_SUBJECT_CLAIM"
 )
+
+// DefaultSubjectClaim is the token claim used to map a verified caller to a
+// Google identity when EnvSubjectClaim is unset.
+const DefaultSubjectClaim = "email"
+
+// ModeResourceServer is the multi-user operating mode: the server validates each
+// request's bearer token against a trusted OIDC issuer and acts as the mapped
+// caller via the DWD identity backend.
+const ModeResourceServer = "resource-server"
 
 // ModeClassicDelegated is the default operating mode: you sign in with your own
 // Google account and the server acts as you, with Google enforcing your rights
@@ -83,6 +114,24 @@ type Config struct {
 	// requires the signed-in user to hold the matching admin privilege, which
 	// Google enforces. Set by GWS_MCP_ADMIN=true or --admin; carries no secret.
 	Admin bool
+
+	// Audience is the resource-server audience incoming bearer tokens must carry.
+	// Empty means classic-delegated mode; a non-empty value plus --http selects
+	// resource-server mode. It carries no secret.
+	Audience string
+
+	// AllowedIssuers is the parsed GWS_ISSUERS allowlist of trusted OIDC issuer
+	// URLs whose tokens the verifier accepts. It carries no secret.
+	AllowedIssuers []string
+
+	// DWDKeyPath is the path to the domain-wide-delegation service account JSON
+	// key. The file contents are a domain credential and are never logged; expose
+	// presence via Presence instead.
+	DWDKeyPath string
+
+	// SubjectClaim is the verified-token claim mapped to the impersonated Google
+	// user (default DefaultSubjectClaim). It carries no secret.
+	SubjectClaim string
 }
 
 // ConfigFromEnv builds a Config from the GWS_* environment variables. It does
@@ -91,12 +140,28 @@ type Config struct {
 // error.
 func ConfigFromEnv() Config {
 	return Config{
-		ClientID:     strings.TrimSpace(os.Getenv(EnvClientID)),
-		ClientSecret: os.Getenv(EnvClientSecret),
-		AllowWrites:  boolFromEnv(EnvAllowWrites),
-		AllowSends:   boolFromEnv(EnvAllowSends),
-		Admin:        boolFromEnv(EnvAdmin),
+		ClientID:       strings.TrimSpace(os.Getenv(EnvClientID)),
+		ClientSecret:   os.Getenv(EnvClientSecret),
+		AllowWrites:    boolFromEnv(EnvAllowWrites),
+		AllowSends:     boolFromEnv(EnvAllowSends),
+		Admin:          boolFromEnv(EnvAdmin),
+		Audience:       strings.TrimSpace(os.Getenv(EnvAudience)),
+		AllowedIssuers: listFromEnv(EnvIssuers),
+		DWDKeyPath:     strings.TrimSpace(os.Getenv(EnvDWDKeyPath)),
+		SubjectClaim:   strings.TrimSpace(os.Getenv(EnvSubjectClaim)),
 	}
+}
+
+// listFromEnv parses a comma-separated env var into a trimmed, blank-free slice.
+// It returns nil when the variable is unset or holds only blanks.
+func listFromEnv(name string) []string {
+	var out []string
+	for _, v := range strings.Split(os.Getenv(name), ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // boolFromEnv reads an environment variable as a strict boolean: true only for
@@ -112,6 +177,7 @@ func boolFromEnv(name string) bool {
 type Presence struct {
 	ClientID     bool `json:"clientId" jsonschema:"whether GWS_CLIENT_ID is set"`
 	ClientSecret bool `json:"clientSecret" jsonschema:"whether GWS_CLIENT_SECRET is set"`
+	DWDKey       bool `json:"dwdKey,omitempty" jsonschema:"whether GWS_DWD_SA_KEY (resource-server DWD key) is set"`
 }
 
 // Presence reports which GWS_* variables are set without exposing any value.
@@ -119,13 +185,59 @@ func (c Config) Presence() Presence {
 	return Presence{
 		ClientID:     c.ClientID != "",
 		ClientSecret: strings.TrimSpace(c.ClientSecret) != "",
+		DWDKey:       c.DWDKeyPath != "",
 	}
 }
 
-// Mode describes the server's operating mode. M0 always runs classic-delegated;
-// the resource-server and powerful-application tiers land in M5/M8.
+// Mode describes the server's operating mode: resource-server when an audience
+// is configured (multi-user, bearer-validated), otherwise classic-delegated.
 func (c Config) Mode() string {
+	if c.ResourceServerMode() {
+		return ModeResourceServer
+	}
 	return ModeClassicDelegated
+}
+
+// ResourceServerMode reports whether the server should validate incoming bearer
+// tokens and act as the mapped caller (rather than a single signed-in user). It
+// is selected by GWS_AUDIENCE being set.
+func (c Config) ResourceServerMode() bool {
+	return strings.TrimSpace(c.Audience) != ""
+}
+
+// RequireResourceServer validates everything resource-server mode needs: an
+// audience for the incoming-token verifier, at least one trusted issuer, and the
+// domain-wide-delegation service-account key path the DWD backend signs with. It
+// returns a clear error naming every missing variable, never any value.
+func (c Config) RequireResourceServer() error {
+	var missing []string
+	if strings.TrimSpace(c.Audience) == "" {
+		missing = append(missing, EnvAudience)
+	}
+	if len(c.Issuers()) == 0 {
+		missing = append(missing, EnvIssuers)
+	}
+	if strings.TrimSpace(c.DWDKeyPath) == "" {
+		missing = append(missing, EnvDWDKeyPath)
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("resource-server mode requires %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+// Issuers returns the trusted OIDC issuer allowlist for the verifier.
+func (c Config) Issuers() []string {
+	return c.AllowedIssuers
+}
+
+// SubjectClaimOrDefault returns the configured token claim to map to a Google
+// user, or DefaultSubjectClaim ("email") when unset.
+func (c Config) SubjectClaimOrDefault() string {
+	if s := strings.TrimSpace(c.SubjectClaim); s != "" {
+		return s
+	}
+	return DefaultSubjectClaim
 }
 
 // RequirePersonal validates that the credentials classic-delegated mode needs

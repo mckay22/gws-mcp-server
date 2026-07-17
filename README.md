@@ -18,15 +18,17 @@ built to the same principles:
   called over plain `net/http` with `fields` projection — no generated API
   clients, minimal PII in model context.
 
-> **Status: M3 (classic-delegated reads + gated writes/sends).** Stdio MCP
-> server that signs you in with your own Google account (installed-app OAuth:
-> loopback + PKCE) and acts as you across Gmail, Calendar, and Drive: reads by
-> default, plus gated mutations (drafts, labels, uploads) behind
-> `--allow-writes` and irreversible/egress actions (mail send/reply, invites,
-> sharing) behind a separate `--allow-sends`. Gated tools return dry-run
-> previews until their gate is open. Next: Directory + audit (governance) reads,
-> and a multi-user resource-server mode validating bearer tokens from any OIDC
-> IdP. See [docs/capabilities.md](docs/capabilities.md) for the tool inventory.
+> **Status: M5 (reads + gated writes/sends + Directory + resource-server mode).**
+> Signs you in with your own Google account (installed-app OAuth: loopback +
+> PKCE) and acts as you across Gmail, Calendar, and Drive: reads by default,
+> gated mutations behind `--allow-writes`, and irreversible/egress actions behind
+> a separate `--allow-sends` (dry-run previews until a gate opens). Admin SDK
+> Directory reads behind `--admin`. Also runs as a **multi-user resource server**
+> (`--http`): it validates each request's bearer token against any OIDC IdP
+> (Keycloak, Entra, Google) and acts as the mapped caller via domain-wide
+> delegation. See [docs/auth.md](docs/auth.md) for the identity model and
+> [docs/capabilities.md](docs/capabilities.md) for the tools. Next: governance
+> (audit/Reports, Directory writes) and the powerful tiers.
 
 ## Running (classic-delegated mode)
 
@@ -58,6 +60,25 @@ user is a Workspace/Cloud Identity admin).
 | `GWS_CLIENT_SECRET` | The paired client secret. Never logged or returned |
 | `GWS_MCP_ALLOW_WRITES` | `true` opens the write gate (same as `--allow-writes`) |
 | `GWS_MCP_ALLOW_SENDS` | `true` opens the send gate (same as `--allow-sends`; independent of writes) |
+
+## Running (resource-server mode)
+
+For a shared, multi-user deployment, serve over HTTP and validate each request's
+bearer token against your OIDC IdP:
+
+```sh
+export GWS_AUDIENCE="api://gws-mcp"            # the audience tokens must carry
+export GWS_ISSUERS="https://keycloak.example/realms/main"  # trusted issuer(s), comma-separated
+export GWS_DWD_SA_KEY="/run/secrets/dwd-sa.json"           # domain-wide-delegation SA key
+./gws-mcp-server --http :8080
+```
+
+Each request is verified (signature/issuer/audience/expiry), mapped to a Google
+user via a configurable claim (`GWS_SUBJECT_CLAIM`, default `email`), and
+impersonated via domain-wide delegation — Google enforces that user's rights.
+The DWD key is a domain credential: keep its granted scopes minimal, store it
+outside the repo, and run this mode behind an authenticating gateway. See
+[docs/auth.md](docs/auth.md).
 
 Testable for free on a consumer `@gmail.com`: create the OAuth client in
 *Testing* mode (no app verification needed for your own account) and add
