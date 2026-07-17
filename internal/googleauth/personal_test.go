@@ -3,6 +3,7 @@ package googleauth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -81,6 +82,57 @@ func TestGoogleTokenSignsInOnceAndRefreshes(t *testing.T) {
 	}
 	if refreshHits != 1 {
 		t.Errorf("token endpoint hit %d times, want 1 (second call served from cache)", refreshHits)
+	}
+}
+
+// TestGoogleTokenRefreshSurvivesRequestCancellation is the regression test for
+// the refresh-context bug: the refreshing token source must NOT be bound to the
+// first tool call's (request-scoped) context, or every refresh after the initial
+// access token expires would fail once that request is cancelled. The token
+// endpoint here always returns an immediately-stale token, so each GoogleToken
+// call forces a fresh refresh; cancelling the first call's context must not break
+// the later one.
+func TestGoogleTokenRefreshSurvivesRequestCancellation(t *testing.T) {
+	var hits int32
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		// expires_in=1 is inside oauth2's expiry delta, so the returned token is
+		// treated as already stale and the next call refreshes again.
+		fmt.Fprintf(w, `{"access_token":"acc-%d","token_type":"Bearer","expires_in":1}`, n)
+	}))
+	defer tokenSrv.Close()
+
+	p := &Personal{
+		oauth: &oauth2.Config{
+			ClientID:     "id",
+			ClientSecret: "sec",
+			Endpoint:     oauth2.Endpoint{TokenURL: tokenSrv.URL, AuthStyle: oauth2.AuthStyleInParams},
+		},
+		authorize: func(_ context.Context, _ *oauth2.Config) (*oauth2.Token, error) {
+			return &oauth2.Token{
+				AccessToken:  "initial-access",
+				RefreshToken: "refresh-tok",
+				Expiry:       time.Now().Add(-time.Hour), // expired → forces a refresh
+			}, nil
+		},
+	}
+
+	// First call builds the refreshing source; cancel its context afterward to
+	// simulate the tool handler's request completing.
+	ctx1, cancel := context.WithCancel(context.Background())
+	if _, err := p.GoogleToken(ctx1); err != nil {
+		t.Fatalf("first GoogleToken: %v", err)
+	}
+	cancel()
+
+	// The cached token is already stale, so this call must refresh again. With the
+	// bug it would fail with "context canceled"; with the fix it succeeds.
+	if _, err := p.GoogleToken(context.Background()); err != nil {
+		t.Fatalf("refresh after the first request context was cancelled: %v", err)
+	}
+	if hits < 2 {
+		t.Fatalf("token endpoint hit %d times, want >= 2 (a second refresh must have occurred)", hits)
 	}
 }
 

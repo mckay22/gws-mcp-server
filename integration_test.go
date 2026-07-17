@@ -68,7 +68,7 @@ func (fi *httpFakeIssuer) token(t *testing.T, aud, email string) string {
 	t.Helper()
 	now := time.Now()
 	payload, _ := json.Marshal(map[string]any{
-		"iss": fi.url, "aud": aud, "sub": "sub-1", "email": email,
+		"iss": fi.url, "aud": aud, "sub": "sub-1", "email": email, "email_verified": true,
 		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
 	})
 	jws, err := fi.signer.Sign(payload)
@@ -132,7 +132,7 @@ func newResourceServer(t *testing.T, fi *httpFakeIssuer) (*httptest.Server, conf
 		AllowedIssuers: []string{fi.url},
 		DWDKeyPath:     writeFakeSAKey(t),
 	}
-	verifier, err := oidcauth.NewVerifier(context.Background(), cfg.Issuers(), cfg.Audience, cfg.SubjectClaimOrDefault())
+	verifier, err := oidcauth.NewVerifier(context.Background(), cfg.Issuers(), cfg.Audience, cfg.SubjectClaimOrDefault(), !cfg.TrustUnverifiedEmail)
 	if err != nil {
 		t.Fatalf("verifier: %v", err)
 	}

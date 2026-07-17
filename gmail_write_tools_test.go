@@ -191,3 +191,36 @@ func extractRawField(t *testing.T, body string) string {
 	}
 	return rest[:j]
 }
+
+// TestBuildMIMERejectsHeaderInjection is the regression guard for MIME header
+// injection: a recipient or In-Reply-To value carrying a CR/LF must be rejected
+// rather than smuggle an extra header (e.g. a hidden Bcc) into the message.
+func TestBuildMIMERejectsHeaderInjection(t *testing.T) {
+	injections := []struct {
+		name    string
+		to, cc  []string
+		inReply string
+	}{
+		{"to newline", []string{"ok@example.com", "evil@example.com\r\nBcc: victim@example.com"}, nil, ""},
+		{"cc newline", []string{"ok@example.com"}, []string{"x@example.com\nBcc: victim@example.com"}, ""},
+		{"in-reply-to newline", []string{"ok@example.com"}, nil, "<id>\r\nBcc: victim@example.com"},
+	}
+	for _, tc := range injections {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := buildMIME(tc.to, tc.cc, "Subj", "body", tc.inReply); err == nil {
+				t.Error("expected header-injection rejection, got nil error")
+			}
+		})
+	}
+
+	// A clean message — including a newline in the BODY, which is legitimate —
+	// still builds.
+	if _, err := buildMIME([]string{"ok@example.com"}, []string{"cc@example.com"}, "Subject line", "line one\nline two", ""); err != nil {
+		t.Fatalf("clean message rejected: %v", err)
+	}
+	// A CR/LF in the subject is neutralized by Q-encoding, so it is not an
+	// injection and must not be rejected.
+	if _, err := buildMIME([]string{"ok@example.com"}, nil, "Subj\r\nBcc: x@example.com", "body", ""); err != nil {
+		t.Fatalf("subject with CRLF should be Q-encoded, not rejected: %v", err)
+	}
+}

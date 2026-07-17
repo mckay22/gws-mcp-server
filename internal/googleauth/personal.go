@@ -103,7 +103,14 @@ func (p *Personal) GoogleToken(ctx context.Context) (string, error) {
 		// oauth2.Config.TokenSource wraps the token in a refreshing, reusable
 		// source: it hands back the cached access token until it nears expiry,
 		// then refreshes using the refresh token against the token endpoint.
-		p.src = p.oauth.TokenSource(ctx, tok)
+		//
+		// The context passed here is captured by the refresher and reused for every
+		// future refresh HTTP call. It MUST NOT be this (request-scoped) call's
+		// context: the go-sdk cancels the tool handler's context when the call
+		// returns, so a captured request context would cancel every refresh after
+		// the first access token expires (~1h), silently killing the server until
+		// restart. WithoutCancel keeps any values but never cancels or expires.
+		p.src = p.oauth.TokenSource(context.WithoutCancel(ctx), tok)
 	}
 
 	tok, err := p.src.Token()

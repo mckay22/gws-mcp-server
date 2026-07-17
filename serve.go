@@ -37,7 +37,7 @@ func serveHTTP(ctx context.Context, addr string, cfg config.Config) error {
 		return err
 	}
 
-	verifier, err := oidcauth.NewVerifier(ctx, cfg.Issuers(), cfg.Audience, cfg.SubjectClaimOrDefault())
+	verifier, err := oidcauth.NewVerifier(ctx, cfg.Issuers(), cfg.Audience, cfg.SubjectClaimOrDefault(), !cfg.TrustUnverifiedEmail)
 	if err != nil {
 		return fmt.Errorf("configuring OIDC token verifier: %w", err)
 	}

@@ -24,10 +24,33 @@ func registerGmailWriteTools(server *mcp.Server, gc *gapi.Client, allowWrites, a
 	registerGmailReply(server, gc, allowWrites, allowSends)
 }
 
+// headerSafe rejects any value containing a CR or LF, which — interpolated into
+// a MIME header — would let a caller inject extra headers (e.g. a smuggled
+// Bcc: to exfiltrate a copy). It guards the header values that are written
+// verbatim: recipient addresses and the In-Reply-To id. The subject is safe
+// because it is RFC 2047 Q-encoded (which neutralizes CR/LF), and the body is
+// safe because it follows the header/body separator.
+func headerSafe(values ...string) error {
+	for _, v := range values {
+		if strings.ContainsAny(v, "\r\n") {
+			return fmt.Errorf("header value must not contain a newline (possible header injection): %q", v)
+		}
+	}
+	return nil
+}
+
 // buildMIME assembles a minimal RFC 2822 message. The From is left to Gmail
 // (it uses the authenticated user), so only To/Cc/Subject/body are set. inReplyTo
-// and references, when set, thread the reply. A plain-text body is used.
-func buildMIME(to, cc []string, subject, body, inReplyTo string) string {
+// and references, when set, thread the reply. A plain-text body is used. It
+// rejects newline-bearing header values (see headerSafe) rather than emit a
+// header-injectable message.
+func buildMIME(to, cc []string, subject, body, inReplyTo string) (string, error) {
+	headers := append(append([]string{}, to...), cc...)
+	headers = append(headers, inReplyTo)
+	if err := headerSafe(headers...); err != nil {
+		return "", err
+	}
+
 	var b strings.Builder
 	if len(to) > 0 {
 		fmt.Fprintf(&b, "To: %s\r\n", strings.Join(to, ", "))
@@ -45,7 +68,7 @@ func buildMIME(to, cc []string, subject, body, inReplyTo string) string {
 	b.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n")
 	b.WriteString("\r\n")
 	b.WriteString(body)
-	return b.String()
+	return b.String(), nil
 }
 
 // rawMessage base64url-encodes a MIME message for Gmail's {raw} wire form.
@@ -81,7 +104,10 @@ func registerGmailCreateDraft(server *mcp.Server, gc *gapi.Client, allowWrites, 
 		if len(in.To) == 0 || strings.TrimSpace(in.Subject) == "" {
 			return nil, writeOutput{}, fmt.Errorf("to and subject are required")
 		}
-		mimeText := buildMIME(in.To, in.Cc, in.Subject, in.Body, "")
+		mimeText, err := buildMIME(in.To, in.Cc, in.Subject, in.Body, "")
+		if err != nil {
+			return nil, writeOutput{}, err
+		}
 		plan := writePlan{
 			Summary:     fmt.Sprintf("create draft to %s: %q", strings.Join(in.To, ", "), in.Subject),
 			Gate:        gateWrites,
@@ -153,7 +179,10 @@ func registerGmailSend(server *mcp.Server, gc *gapi.Client, allowWrites, allowSe
 		if len(in.To) == 0 || strings.TrimSpace(in.Subject) == "" {
 			return nil, writeOutput{}, fmt.Errorf("to and subject are required")
 		}
-		mimeText := buildMIME(in.To, in.Cc, in.Subject, in.Body, "")
+		mimeText, err := buildMIME(in.To, in.Cc, in.Subject, in.Body, "")
+		if err != nil {
+			return nil, writeOutput{}, err
+		}
 		plan := writePlan{
 			Summary:   fmt.Sprintf("send mail to %s: %q", strings.Join(in.To, ", "), in.Subject),
 			Gate:      gateSends,
@@ -187,7 +216,10 @@ func registerGmailReply(server *mcp.Server, gc *gapi.Client, allowWrites, allowS
 		if strings.TrimSpace(in.ThreadID) == "" || len(in.To) == 0 {
 			return nil, writeOutput{}, fmt.Errorf("threadId and to are required")
 		}
-		mimeText := buildMIME(in.To, in.Cc, in.Subject, in.Body, in.InReplyTo)
+		mimeText, err := buildMIME(in.To, in.Cc, in.Subject, in.Body, in.InReplyTo)
+		if err != nil {
+			return nil, writeOutput{}, err
+		}
 		preview := readablePreview(in.To, in.Cc, in.Subject, in.Body)
 		preview["threadId"] = in.ThreadID
 		plan := writePlan{

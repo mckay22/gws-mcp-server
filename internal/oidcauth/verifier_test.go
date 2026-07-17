@@ -83,16 +83,18 @@ func (fi *fakeIssuer) sign(t *testing.T, claims map[string]any) string {
 	return tok
 }
 
-// standardClaims builds a valid claim set for this issuer and audience.
+// standardClaims builds a valid claim set for this issuer and audience,
+// representing a properly-configured IdP that asserts a verified email.
 func (fi *fakeIssuer) standardClaims(aud string) map[string]any {
 	now := time.Now()
 	return map[string]any{
-		"iss":   fi.url,
-		"aud":   aud,
-		"sub":   "user-123",
-		"email": "ada@example.com",
-		"iat":   now.Unix(),
-		"exp":   now.Add(time.Hour).Unix(),
+		"iss":            fi.url,
+		"aud":            aud,
+		"sub":            "user-123",
+		"email":          "ada@example.com",
+		"email_verified": true,
+		"iat":            now.Unix(),
+		"exp":            now.Add(time.Hour).Unix(),
 	}
 }
 
@@ -100,7 +102,7 @@ const testAudience = "api://gws-mcp"
 
 func TestVerifierAcceptsValidToken(t *testing.T) {
 	fi := newFakeIssuer(t)
-	v, err := NewVerifier(context.Background(), []string{fi.url}, testAudience, "email")
+	v, err := NewVerifier(context.Background(), []string{fi.url}, testAudience, "email", true)
 	if err != nil {
 		t.Fatalf("NewVerifier: %v", err)
 	}
@@ -118,7 +120,7 @@ func TestVerifierAcceptsValidToken(t *testing.T) {
 
 func TestVerifierMapsConfigurableClaim(t *testing.T) {
 	fi := newFakeIssuer(t)
-	v, _ := NewVerifier(context.Background(), []string{fi.url}, testAudience, "preferred_username")
+	v, _ := NewVerifier(context.Background(), []string{fi.url}, testAudience, "preferred_username", true)
 
 	claims := fi.standardClaims(testAudience)
 	claims["preferred_username"] = "grace@example.com"
@@ -131,9 +133,73 @@ func TestVerifierMapsConfigurableClaim(t *testing.T) {
 	}
 }
 
+// TestVerifierRequiresEmailVerified is the impersonation-safety guard: when the
+// subject claim is "email" and verification is required, a token whose
+// email_verified is missing or false is rejected — so an unverified/mutable
+// email can never become a DWD impersonation target.
+func TestVerifierRequiresEmailVerified(t *testing.T) {
+	fi := newFakeIssuer(t)
+	v, _ := NewVerifier(context.Background(), []string{fi.url}, testAudience, "email", true)
+
+	t.Run("missing email_verified rejected", func(t *testing.T) {
+		claims := fi.standardClaims(testAudience)
+		delete(claims, "email_verified")
+		if _, err := v.Verify(context.Background(), fi.sign(t, claims)); err == nil {
+			t.Fatal("expected rejection when email_verified is absent")
+		}
+	})
+
+	t.Run("email_verified false rejected", func(t *testing.T) {
+		claims := fi.standardClaims(testAudience)
+		claims["email_verified"] = false
+		if _, err := v.Verify(context.Background(), fi.sign(t, claims)); err == nil {
+			t.Fatal("expected rejection when email_verified is false")
+		}
+	})
+
+	t.Run("string true accepted", func(t *testing.T) {
+		claims := fi.standardClaims(testAudience)
+		claims["email_verified"] = "true" // some IdPs stringify the boolean
+		if _, err := v.Verify(context.Background(), fi.sign(t, claims)); err != nil {
+			t.Fatalf("expected acceptance for email_verified=\"true\": %v", err)
+		}
+	})
+}
+
+// TestVerifierTrustUnverifiedEmailOptOut proves the escape hatch: with the check
+// disabled, an unverified email is accepted (the operator has vouched for the
+// issuer).
+func TestVerifierTrustUnverifiedEmailOptOut(t *testing.T) {
+	fi := newFakeIssuer(t)
+	v, _ := NewVerifier(context.Background(), []string{fi.url}, testAudience, "email", false)
+	claims := fi.standardClaims(testAudience)
+	delete(claims, "email_verified")
+	got, err := v.Verify(context.Background(), fi.sign(t, claims))
+	if err != nil {
+		t.Fatalf("expected acceptance with the check disabled: %v", err)
+	}
+	if got.GoogleUser != "ada@example.com" {
+		t.Errorf("GoogleUser = %q", got.GoogleUser)
+	}
+}
+
+// TestVerifierEmailVerifiedIgnoredForNonEmailClaim confirms the check only
+// applies when the mapping claim is "email": a custom claim the operator chose is
+// not subject to email_verified.
+func TestVerifierEmailVerifiedIgnoredForNonEmailClaim(t *testing.T) {
+	fi := newFakeIssuer(t)
+	v, _ := NewVerifier(context.Background(), []string{fi.url}, testAudience, "preferred_username", true)
+	claims := fi.standardClaims(testAudience)
+	delete(claims, "email_verified")
+	claims["preferred_username"] = "grace@example.com"
+	if _, err := v.Verify(context.Background(), fi.sign(t, claims)); err != nil {
+		t.Fatalf("email_verified must not gate a non-email subject claim: %v", err)
+	}
+}
+
 func TestVerifierRejectsWrongAudience(t *testing.T) {
 	fi := newFakeIssuer(t)
-	v, _ := NewVerifier(context.Background(), []string{fi.url}, testAudience, "email")
+	v, _ := NewVerifier(context.Background(), []string{fi.url}, testAudience, "email", true)
 	_, err := v.Verify(context.Background(), fi.sign(t, fi.standardClaims("some-other-api")))
 	if err == nil {
 		t.Fatal("expected rejection for wrong audience")
@@ -142,7 +208,7 @@ func TestVerifierRejectsWrongAudience(t *testing.T) {
 
 func TestVerifierRejectsExpired(t *testing.T) {
 	fi := newFakeIssuer(t)
-	v, _ := NewVerifier(context.Background(), []string{fi.url}, testAudience, "email")
+	v, _ := NewVerifier(context.Background(), []string{fi.url}, testAudience, "email", true)
 	claims := fi.standardClaims(testAudience)
 	claims["exp"] = time.Now().Add(-time.Hour).Unix()
 	claims["iat"] = time.Now().Add(-2 * time.Hour).Unix()
@@ -153,7 +219,7 @@ func TestVerifierRejectsExpired(t *testing.T) {
 
 func TestVerifierRejectsWrongIssuer(t *testing.T) {
 	fi := newFakeIssuer(t)
-	v, _ := NewVerifier(context.Background(), []string{fi.url}, testAudience, "email")
+	v, _ := NewVerifier(context.Background(), []string{fi.url}, testAudience, "email", true)
 	claims := fi.standardClaims(testAudience)
 	claims["iss"] = "https://attacker.example.com"
 	if _, err := v.Verify(context.Background(), fi.sign(t, claims)); err == nil {
@@ -163,7 +229,7 @@ func TestVerifierRejectsWrongIssuer(t *testing.T) {
 
 func TestVerifierEmptyWhenClaimAbsent(t *testing.T) {
 	fi := newFakeIssuer(t)
-	v, _ := NewVerifier(context.Background(), []string{fi.url}, testAudience, "email")
+	v, _ := NewVerifier(context.Background(), []string{fi.url}, testAudience, "email", true)
 	claims := fi.standardClaims(testAudience)
 	delete(claims, "email")
 	got, err := v.Verify(context.Background(), fi.sign(t, claims))
@@ -176,17 +242,17 @@ func TestVerifierEmptyWhenClaimAbsent(t *testing.T) {
 }
 
 func TestNewVerifierValidatesArgs(t *testing.T) {
-	if _, err := NewVerifier(context.Background(), []string{"https://x"}, "", "email"); err == nil {
+	if _, err := NewVerifier(context.Background(), []string{"https://x"}, "", "email", true); err == nil {
 		t.Error("expected error with empty audience")
 	}
-	if _, err := NewVerifier(context.Background(), nil, testAudience, "email"); err == nil {
+	if _, err := NewVerifier(context.Background(), nil, testAudience, "email", true); err == nil {
 		t.Error("expected error with no issuers")
 	}
 }
 
 func TestVerifierRejectsMalformedToken(t *testing.T) {
 	fi := newFakeIssuer(t)
-	v, _ := NewVerifier(context.Background(), []string{fi.url}, testAudience, "email")
+	v, _ := NewVerifier(context.Background(), []string{fi.url}, testAudience, "email", true)
 	if _, err := v.Verify(context.Background(), "not.a.jwt.at.all"); err == nil {
 		t.Fatal("expected rejection for malformed token")
 	}

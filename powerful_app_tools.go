@@ -123,7 +123,10 @@ func registerAppSendMail(server *mcp.Server, gc *gapi.Client, allowWrites, allow
 		if strings.TrimSpace(in.User) == "" || len(in.To) == 0 || strings.TrimSpace(in.Subject) == "" {
 			return nil, writeOutput{}, fmt.Errorf("user, to, and subject are required")
 		}
-		mimeText := buildMIME(in.To, in.Cc, in.Subject, in.Body, "")
+		mimeText, err := buildMIME(in.To, in.Cc, in.Subject, in.Body, "")
+		if err != nil {
+			return nil, writeOutput{}, err
+		}
 		preview := readablePreview(in.To, in.Cc, in.Subject, in.Body)
 		preview["sendAs"] = in.User
 		plan := writePlan{

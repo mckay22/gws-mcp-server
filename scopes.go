@@ -122,16 +122,22 @@ func requiredScopes(cfg config.Config) []string {
 
 // appScopes returns the scopes the powerful-application tier's service account
 // mints tokens for. The SA's domain-wide-delegation grant must include these.
-// Reads are always present; the mail-send scope is added only under the send
-// gate; the directory-write scopes back the bulk lifecycle tools.
+// Reads are always present; the directory-write scopes (which back the bulk
+// lifecycle tools) are requested only under the write gate, and the mail-send
+// scope only under the send gate — so a read-only application deployment never
+// mints a token carrying write/send capability, matching requiredScopes.
 func appScopes(cfg config.Config) []string {
 	scopes := []string{
 		scopeGmailReadonly,
 		scopeGmailSettingsBasic,
 		scopeCalendarReadonly,
 		scopeDriveReadonly,
-		scopeAdminUser,        // bulk user suspend/update
-		scopeAdminGroupMember, // bulk group membership
+	}
+	if cfg.AllowWrites {
+		scopes = append(scopes,
+			scopeAdminUser,        // bulk user suspend/update
+			scopeAdminGroupMember, // bulk group membership
+		)
 	}
 	if cfg.AllowSends {
 		scopes = append(scopes, scopeGmailSend)

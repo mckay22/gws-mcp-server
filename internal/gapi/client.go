@@ -246,6 +246,12 @@ func (c *Client) List(ctx context.Context, base, path string, query url.Values, 
 // as JSON) along with its Content-Type, on any 2xx status. It backs media
 // downloads and exports (Drive alt=media / files.export) that return file bytes
 // rather than JSON. A non-2xx status is decoded into an *Error.
+//
+// The body is read through the shared maxResponseBytes cap and is silently
+// TRUNCATED (no error, no signal) if the response exceeds it. The current caller
+// (get_file_content) re-caps far below that and sets its own truncation flag, so
+// this is invisible today — but any future full-fidelity download caller MUST
+// account for the cap rather than assume it received the complete object.
 func (c *Client) GetRaw(ctx context.Context, base, path string, query url.Values) ([]byte, string, error) {
 	rawURL, err := c.endpoint(base, path, query)
 	if err != nil {

@@ -68,6 +68,14 @@ const (
 	// DWD backend impersonates (the minted JWT's sub). Default "email".
 	EnvSubjectClaim = "GWS_SUBJECT_CLAIM"
 
+	// EnvTrustUnverifiedEmail opts OUT of the email_verified safety check. When
+	// the subject claim is "email", the verifier by default requires the token to
+	// carry email_verified==true before impersonating that Google user — an
+	// unverified/mutable email would otherwise let a caller be impersonated as an
+	// arbitrary Workspace user. Set to "true" ONLY when every trusted issuer is
+	// guaranteed to assert verified emails; it is a security-relevant relaxation.
+	EnvTrustUnverifiedEmail = "GWS_TRUST_UNVERIFIED_EMAIL"
+
 	// EnvPowerful registers the powerful-delegated end-user tools (Gmail
 	// settings, Tasks, People, Chat, Meet, Drive shared-with-me). It is a
 	// REGISTRATION switch, not a gate: the tools it exposes still honor the
@@ -160,6 +168,11 @@ type Config struct {
 	// user (default DefaultSubjectClaim). It carries no secret.
 	SubjectClaim string
 
+	// TrustUnverifiedEmail opts out of requiring email_verified==true when the
+	// subject claim is "email" (see EnvTrustUnverifiedEmail). Default false: the
+	// verifier enforces the check. Carries no secret.
+	TrustUnverifiedEmail bool
+
 	// Powerful registers the powerful-delegated end-user tools (Gmail settings,
 	// Tasks, People, Chat, Meet, Drive shared-with-me). Registration only — those
 	// tools still honor AllowWrites/AllowSends. Set by GWS_MCP_POWERFUL=true or
@@ -187,19 +200,20 @@ type Config struct {
 // error.
 func ConfigFromEnv() Config {
 	return Config{
-		ClientID:        strings.TrimSpace(os.Getenv(EnvClientID)),
-		ClientSecret:    os.Getenv(EnvClientSecret),
-		AllowWrites:     boolFromEnv(EnvAllowWrites),
-		AllowSends:      boolFromEnv(EnvAllowSends),
-		Admin:           boolFromEnv(EnvAdmin),
-		Audience:        strings.TrimSpace(os.Getenv(EnvAudience)),
-		AllowedIssuers:  listFromEnv(EnvIssuers),
-		DWDKeyPath:      strings.TrimSpace(os.Getenv(EnvDWDKeyPath)),
-		SubjectClaim:    strings.TrimSpace(os.Getenv(EnvSubjectClaim)),
-		Powerful:        boolFromEnv(EnvPowerful),
-		AppOnly:         boolFromEnv(EnvAppOnly),
-		AppKeyPath:      strings.TrimSpace(os.Getenv(EnvAppKeyPath)),
-		AppAdminSubject: strings.TrimSpace(os.Getenv(EnvAppAdminSubject)),
+		ClientID:             strings.TrimSpace(os.Getenv(EnvClientID)),
+		ClientSecret:         os.Getenv(EnvClientSecret),
+		AllowWrites:          boolFromEnv(EnvAllowWrites),
+		AllowSends:           boolFromEnv(EnvAllowSends),
+		Admin:                boolFromEnv(EnvAdmin),
+		Audience:             strings.TrimSpace(os.Getenv(EnvAudience)),
+		AllowedIssuers:       listFromEnv(EnvIssuers),
+		DWDKeyPath:           strings.TrimSpace(os.Getenv(EnvDWDKeyPath)),
+		SubjectClaim:         strings.TrimSpace(os.Getenv(EnvSubjectClaim)),
+		TrustUnverifiedEmail: boolFromEnv(EnvTrustUnverifiedEmail),
+		Powerful:             boolFromEnv(EnvPowerful),
+		AppOnly:              boolFromEnv(EnvAppOnly),
+		AppKeyPath:           strings.TrimSpace(os.Getenv(EnvAppKeyPath)),
+		AppAdminSubject:      strings.TrimSpace(os.Getenv(EnvAppAdminSubject)),
 	}
 }
 

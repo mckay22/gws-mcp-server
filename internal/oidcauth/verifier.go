@@ -35,19 +35,28 @@ type Claims struct {
 	Expiry time.Time
 }
 
+// emailClaim is the standard OIDC claim whose trustworthiness is governed by the
+// companion email_verified claim.
+const emailClaim = "email"
+
 // Verifier validates bearer tokens against one or more trusted OIDC issuers for
 // a single audience, extracting a configurable Google-user claim. It is safe for
 // concurrent use.
 type Verifier struct {
 	verifiers    map[string]*oidc.IDTokenVerifier // keyed by trusted issuer URL
 	subjectClaim string
+	// requireEmailVerified, when true and subjectClaim is "email", rejects a token
+	// whose email_verified claim is not true — so an unverified/mutable email can
+	// never become a DWD impersonation target.
+	requireEmailVerified bool
 }
 
 // NewVerifier trusts the given issuer URLs and requires audience (this server's
 // identifier). subjectClaim names the claim mapped to a Google user (e.g.
-// "email"). It discovers each issuer's OIDC metadata — and thus its JWKS — so it
-// performs network I/O.
-func NewVerifier(ctx context.Context, issuers []string, audience, subjectClaim string) (*Verifier, error) {
+// "email"). When requireEmailVerified is true and subjectClaim is "email", a
+// token must additionally carry email_verified==true to be accepted. It discovers
+// each issuer's OIDC metadata — and thus its JWKS — so it performs network I/O.
+func NewVerifier(ctx context.Context, issuers []string, audience, subjectClaim string, requireEmailVerified bool) (*Verifier, error) {
 	if strings.TrimSpace(audience) == "" {
 		return nil, errors.New("oidcauth: audience is required")
 	}
@@ -69,7 +78,7 @@ func NewVerifier(ctx context.Context, issuers []string, audience, subjectClaim s
 	if len(verifiers) == 0 {
 		return nil, errors.New("oidcauth: at least one issuer is required")
 	}
-	return &Verifier{verifiers: verifiers, subjectClaim: subjectClaim}, nil
+	return &Verifier{verifiers: verifiers, subjectClaim: subjectClaim, requireEmailVerified: requireEmailVerified}, nil
 }
 
 // Verify validates the token — signature against the selected issuer's JWKS,
@@ -93,12 +102,38 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (Claims, error) 
 		return Claims{}, fmt.Errorf("oidcauth: decode token claims: %w", err)
 	}
 	googleUser, _ := all[v.subjectClaim].(string)
+	googleUser = strings.TrimSpace(googleUser)
+
+	// When impersonation binds to the email claim, that email must be verified —
+	// otherwise a token carrying an unverified/mutable email would let the caller
+	// be impersonated as an arbitrary Workspace user. Only enforced when a
+	// non-empty email was actually extracted; an absent claim yields an unmappable
+	// caller that the resource-server layer rejects anyway.
+	if v.requireEmailVerified && v.subjectClaim == emailClaim && googleUser != "" {
+		if !claimIsTrue(all["email_verified"]) {
+			return Claims{}, errors.New("oidcauth: email claim is not verified (email_verified != true); " +
+				"impersonation refused — set GWS_TRUST_UNVERIFIED_EMAIL=true only if every trusted issuer asserts verified emails")
+		}
+	}
 
 	return Claims{
 		Subject:    tok.Subject,
-		GoogleUser: strings.TrimSpace(googleUser),
+		GoogleUser: googleUser,
 		Expiry:     tok.Expiry,
 	}, nil
+}
+
+// claimIsTrue reports whether an OIDC boolean-ish claim is true. Issuers encode
+// booleans as either a JSON bool or the string "true", so both are accepted.
+func claimIsTrue(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return strings.EqualFold(strings.TrimSpace(t), "true")
+	default:
+		return false
+	}
 }
 
 // verifierFor selects the OIDC verifier for the token. With a single trusted

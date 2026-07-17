@@ -6,6 +6,44 @@ by milestone.
 
 ## [Unreleased]
 
+### Fixed / Security (post-M9 review)
+
+A security- and correctness-focused review of the auth path (independently plus
+an adversarial reviewer) found the scariest surfaces solid — the OIDC verifier
+core, DWD per-user token isolation, gapi retry/paging bounds, the two-gate
+model, and cross-caller identity isolation in resource-server mode — and turned
+up five fixes:
+
+- **(High) Classic-delegated token refresh no longer dies after ~1h.** The
+  refreshing OAuth token source was built from the first tool call's
+  request-scoped context, which the MCP SDK cancels when that call returns; once
+  the initial access token expired, every refresh failed with `context canceled`
+  and the server was silently dead until restart. It now builds the source from
+  a non-cancellable context (`context.WithoutCancel`). Regression-tested against
+  a fake token endpoint with the first request's context cancelled.
+- **(Medium) DWD impersonation now requires a verified email.** When the subject
+  claim is `email`, the resource-server verifier rejects a token whose
+  `email_verified` is not `true` — an unverified/mutable email could otherwise
+  let a caller be impersonated as an arbitrary Workspace user. Opt out with
+  `GWS_TRUST_UNVERIFIED_EMAIL=true` only when every trusted issuer guarantees
+  verified emails. Non-`email` subject claims (operator-chosen) are unaffected.
+- **(Medium) Gmail MIME builder rejects header injection.** Recipient addresses
+  and the `In-Reply-To` value are validated for CR/LF before being written into
+  message headers, so a caller cannot smuggle an extra header (e.g. a hidden
+  `Bcc:` for exfiltration) — relevant under the MCP prompt-injection threat
+  model. The subject was already safe (Q-encoded); the body is unaffected.
+- **(Low) Application-tier scopes follow least privilege.** The app-tier service
+  account no longer requests directory-write scopes when `--allow-writes` is
+  off, matching `requiredScopes` — a read-only application deployment mints no
+  token carrying write capability.
+- **(Low) `gapi.GetRaw` documents its silent 8 MiB truncation** so a future
+  full-download caller cannot mistake a capped body for the complete object (the
+  current caller re-caps far below and is unaffected).
+
+Known follow-up (robustness, low): the DWD SA token exchange runs without a
+request-scoped timeout; a hung Google token endpoint would block the call. Not
+yet addressed.
+
 ### Added
 
 - **M9 — packaging & polish.** A `Dockerfile` (multi-stage: Go build → `scratch`
