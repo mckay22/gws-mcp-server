@@ -8,6 +8,24 @@ by milestone.
 
 ### Added
 
+- **M7 — powerful-delegated tier (`--powerful`).** Fourteen end-user tools
+  behind a registration switch (`GWS_MCP_POWERFUL`), each still honoring the
+  write/send gates. Gmail settings: `gmail_get_vacation` / `gmail_set_vacation`
+  (🟡, the out-of-office analog, via the new client `Put`), `gmail_list_filters`,
+  `gmail_list_send_as`. Tasks: `tasks_list_tasklists`, `tasks_list`,
+  `tasks_create` (🟡), `tasks_complete` (🟡). People: `people_search_contacts`.
+  Chat (Workspace-only): `chat_list_spaces`, `chat_list_messages`,
+  `chat_send_message` (🔴). `meet_conference_records` (edition-gated, errors
+  cleanly). `drive_shared_with_me`. Client gains `Put` (and a PUT case in
+  `runWrite`) plus `BaseTasks`/`BasePeople`/`BaseChat`/`BaseMeet`. Scopes are
+  requested only under `--powerful`: `gmail.settings.basic`, `tasks.readonly`
+  (and `tasks` under `--allow-writes`), `contacts.readonly`, `chat.spaces`/
+  `messages.readonly` (and `chat.messages.create` under `--allow-sends`),
+  `meetings.space.readonly`. health reports `powerful`. Recording-mock tests
+  cover every tool across all five new API hosts, including the vacation write
+  gate, task-create gate, and the Chat send gate (send-gated, not write-gated).
+  No new dependencies.
+
 - **M6 — governance (audit, connected-app & license reads; Directory writes).**
   Three read tools (register under `--admin`): `audit_activities` (Reports API
   activity log for login/admin/drive/token/… with time/actor/IP, RFC3339 bounds

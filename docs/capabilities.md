@@ -120,6 +120,31 @@ Google error cleanly.
 | `directory_group_add_member` | 🟡 | Add a member with a role. |
 | `directory_group_remove_member` | 🟡 | Remove a member. |
 
+## Powerful-delegated tier (M7)
+
+Behind `--powerful` (or `GWS_MCP_POWERFUL=true`) — a registration switch; each
+tool still honors the write/send gates. Chat and Meet are Workspace-only and
+error cleanly on consumer accounts. Extra scopes (`gmail.settings.basic`,
+`tasks[.readonly]`, `contacts.readonly`, `chat.*`, `meetings.space.readonly`) are
+requested only when the switch is on.
+
+| Tool | Kind | Description |
+| --- | --- | --- |
+| `gmail_get_vacation` | 🟢 | The vacation responder (out-of-office) settings. |
+| `gmail_set_vacation` | 🟡 | Enable/disable the vacation responder. |
+| `gmail_list_filters` | 🟢 | Gmail filters (the inbox-rules analog). |
+| `gmail_list_send_as` | 🟢 | Send-as addresses / aliases. |
+| `tasks_list_tasklists` | 🟢 | The user's task lists. |
+| `tasks_list` | 🟢 | Tasks in a list. |
+| `tasks_create` | 🟡 | Create a task. |
+| `tasks_complete` | 🟡 | Mark a task completed. |
+| `people_search_contacts` | 🟢 | Search personal contacts (People API). |
+| `chat_list_spaces` | 🟢 | Google Chat spaces the user is in. |
+| `chat_list_messages` | 🟢 | Messages in a Chat space. |
+| `chat_send_message` | 🔴 | Post a message to a Chat space. |
+| `meet_conference_records` | 🟢 | Meet conference records (→ recordings/transcripts). |
+| `drive_shared_with_me` | 🟢 | Files others have shared with the user. |
+
 ## Resource-server mode (M5)
 
 The same tool surface is also served over HTTP in multi-user mode (`--http

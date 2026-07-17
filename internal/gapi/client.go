@@ -59,6 +59,19 @@ const (
 	// BaseLicensing is the Enterprise License Manager API v1 base, e.g.
 	// "/product/{productId}/users".
 	BaseLicensing = "https://licensing.googleapis.com/apps/licensing/v1"
+
+	// BaseTasks is the Google Tasks API v1 base, e.g. "/users/@me/lists".
+	BaseTasks = "https://tasks.googleapis.com/tasks/v1"
+
+	// BasePeople is the People API v1 base, e.g. "/people:searchContacts".
+	BasePeople = "https://people.googleapis.com/v1"
+
+	// BaseChat is the Google Chat API v1 base (Workspace-only), e.g. "/spaces".
+	BaseChat = "https://chat.googleapis.com/v1"
+
+	// BaseMeet is the Google Meet API v2 base (edition-gated), e.g.
+	// "/conferenceRecords".
+	BaseMeet = "https://meet.googleapis.com/v2"
 )
 
 const (
@@ -262,6 +275,13 @@ func (c *Client) Post(ctx context.Context, base, path string, query url.Values, 
 // never logged.
 func (c *Client) Patch(ctx context.Context, base, path string, query url.Values, body any) (json.RawMessage, error) {
 	return c.writeJSON(ctx, http.MethodPatch, base, path, query, body)
+}
+
+// Put issues a PUT to base+path with a JSON-encoded body and returns the raw
+// response body on any 2xx status. Google uses PUT to fully replace a resource
+// (e.g. Gmail's vacation settings). A non-2xx status is decoded into an *Error.
+func (c *Client) Put(ctx context.Context, base, path string, query url.Values, body any) (json.RawMessage, error) {
+	return c.writeJSON(ctx, http.MethodPut, base, path, query, body)
 }
 
 // Delete issues a DELETE to base+path with no request body and returns the raw

@@ -127,6 +127,8 @@ func runWrite(ctx context.Context, gc *gapi.Client, allowWrites, allowSends bool
 		}
 	case http.MethodPatch:
 		raw, err = gc.Patch(ctx, plan.Base, plan.Path, plan.Query, applyBody)
+	case http.MethodPut:
+		raw, err = gc.Put(ctx, plan.Base, plan.Path, plan.Query, applyBody)
 	case http.MethodDelete:
 		raw, err = gc.Delete(ctx, plan.Base, plan.Path, plan.Query)
 	default:

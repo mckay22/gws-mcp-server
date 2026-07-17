@@ -50,6 +50,21 @@ const (
 	scopeAdminUser        = "https://www.googleapis.com/auth/admin.directory.user"
 	scopeAdminGroup       = "https://www.googleapis.com/auth/admin.directory.group"
 	scopeAdminGroupMember = "https://www.googleapis.com/auth/admin.directory.group.member"
+
+	// Powerful-delegated scopes (M7), requested only when --powerful is on.
+	// gmail.settings.basic covers reading filters/send-as and reading/writing the
+	// vacation responder. tasks.readonly / tasks split reads from writes.
+	// contacts.readonly covers People contact search. Chat read scopes cover
+	// spaces/messages; chat.messages.create (send) is added under --allow-sends.
+	// meetings.space.readonly covers Meet conference records.
+	scopeGmailSettingsBasic = "https://www.googleapis.com/auth/gmail.settings.basic"
+	scopeTasksReadonly      = "https://www.googleapis.com/auth/tasks.readonly"
+	scopeTasks              = "https://www.googleapis.com/auth/tasks"
+	scopeContactsReadonly   = "https://www.googleapis.com/auth/contacts.readonly"
+	scopeChatSpacesRO       = "https://www.googleapis.com/auth/chat.spaces.readonly"
+	scopeChatMessagesRO     = "https://www.googleapis.com/auth/chat.messages.readonly"
+	scopeChatMessages       = "https://www.googleapis.com/auth/chat.messages.create"
+	scopeMeetReadonly       = "https://www.googleapis.com/auth/meetings.space.readonly"
 )
 
 // requiredScopes returns the OAuth scopes the currently-enabled tools need.
@@ -84,6 +99,22 @@ func requiredScopes(cfg config.Config) []string {
 			// Directory write lifecycle (M6): the read-write directory scopes,
 			// requested only when both the admin switch and the write gate are on.
 			scopes = append(scopes, scopeAdminUser, scopeAdminGroup, scopeAdminGroupMember)
+		}
+	}
+	if cfg.Powerful {
+		scopes = append(scopes,
+			scopeGmailSettingsBasic,
+			scopeTasksReadonly,
+			scopeContactsReadonly,
+			scopeChatSpacesRO,
+			scopeChatMessagesRO,
+			scopeMeetReadonly,
+		)
+		if cfg.AllowWrites {
+			scopes = append(scopes, scopeTasks) // task create/complete
+		}
+		if cfg.AllowSends {
+			scopes = append(scopes, scopeChatMessages) // Chat message send
 		}
 	}
 	return scopes

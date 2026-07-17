@@ -67,6 +67,14 @@ const (
 	// EnvSubjectClaim is the verified-token claim mapped to the Google user the
 	// DWD backend impersonates (the minted JWT's sub). Default "email".
 	EnvSubjectClaim = "GWS_SUBJECT_CLAIM"
+
+	// EnvPowerful registers the powerful-delegated end-user tools (Gmail
+	// settings, Tasks, People, Chat, Meet, Drive shared-with-me). It is a
+	// REGISTRATION switch, not a gate: the tools it exposes still honor the
+	// write/send gates. Some (Chat, Meet) are Workspace-only and error cleanly on
+	// consumer accounts. Unset or anything other than "true" leaves them
+	// unregistered so lean deployments keep a small tool list.
+	EnvPowerful = "GWS_MCP_POWERFUL"
 )
 
 // DefaultSubjectClaim is the token claim used to map a verified caller to a
@@ -132,6 +140,12 @@ type Config struct {
 	// SubjectClaim is the verified-token claim mapped to the impersonated Google
 	// user (default DefaultSubjectClaim). It carries no secret.
 	SubjectClaim string
+
+	// Powerful registers the powerful-delegated end-user tools (Gmail settings,
+	// Tasks, People, Chat, Meet, Drive shared-with-me). Registration only — those
+	// tools still honor AllowWrites/AllowSends. Set by GWS_MCP_POWERFUL=true or
+	// --powerful; carries no secret.
+	Powerful bool
 }
 
 // ConfigFromEnv builds a Config from the GWS_* environment variables. It does
@@ -149,6 +163,7 @@ func ConfigFromEnv() Config {
 		AllowedIssuers: listFromEnv(EnvIssuers),
 		DWDKeyPath:     strings.TrimSpace(os.Getenv(EnvDWDKeyPath)),
 		SubjectClaim:   strings.TrimSpace(os.Getenv(EnvSubjectClaim)),
+		Powerful:       boolFromEnv(EnvPowerful),
 	}
 }
 

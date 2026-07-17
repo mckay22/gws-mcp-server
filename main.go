@@ -38,6 +38,7 @@ func run() error {
 	allowWrites := flag.Bool("allow-writes", false, "enable the write tools (mutations); off = dry-run previews. Also settable via GWS_MCP_ALLOW_WRITES=true.")
 	allowSends := flag.Bool("allow-sends", false, "enable send-class tools (irreversible: mail send, sharing); off = dry-run previews. Separate from --allow-writes. Also GWS_MCP_ALLOW_SENDS=true.")
 	admin := flag.Bool("admin", false, "register the Admin SDK Directory tools and request admin.directory.*.readonly scopes; only useful when the signed-in user is an admin. Also GWS_MCP_ADMIN=true.")
+	powerful := flag.Bool("powerful", false, "register the powerful-delegated end-user tools (Gmail settings, Tasks, People, Chat, Meet, Drive shared-with-me); they still honor the write/send gates. Also GWS_MCP_POWERFUL=true.")
 	flag.Parse()
 
 	// Protocol traffic owns stdout; structured diagnostics go to stderr only.
@@ -53,6 +54,9 @@ func run() error {
 	}
 	if *admin {
 		cfg.Admin = true // the flag ORs with GWS_MCP_ADMIN.
+	}
+	if *powerful {
+		cfg.Powerful = true // the flag ORs with GWS_MCP_POWERFUL.
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -124,6 +128,11 @@ func registerTools(server *mcp.Server, gc *gapi.Client, cfg config.Config) {
 		registerGovernanceReadTools(server, gc)
 		registerDirectoryWriteTools(server, gc, cfg.AllowWrites, cfg.AllowSends)
 	}
+	// Powerful-delegated end-user tier (opt-in registration via --powerful; each
+	// tool still honors the write/send gates).
+	if cfg.Powerful {
+		registerPowerfulTools(server, gc, cfg.AllowWrites, cfg.AllowSends)
+	}
 }
 
 // healthInput has no fields: health takes no arguments.
@@ -139,7 +148,8 @@ type healthOutput struct {
 	Mode      string          `json:"mode" jsonschema:"the operating mode (classic-delegated)"`
 	Writes    bool            `json:"writes" jsonschema:"whether the write tools are enabled (else they dry-run)"`
 	Sends     bool            `json:"sends" jsonschema:"whether send-class tools are enabled (else they dry-run)"`
-	Admin     bool            `json:"admin" jsonschema:"whether the Admin SDK Directory tools are registered"`
+	Admin     bool            `json:"admin" jsonschema:"whether the Admin SDK Directory/governance tools are registered"`
+	Powerful  bool            `json:"powerful" jsonschema:"whether the powerful-delegated end-user tools are registered"`
 	Config    config.Presence `json:"config" jsonschema:"which GWS_* variables are set (booleans only)"`
 }
 
@@ -158,11 +168,12 @@ func registerHealth(server *mcp.Server, cfg config.Config, transport string) {
 			Writes:    cfg.AllowWrites,
 			Sends:     cfg.AllowSends,
 			Admin:     cfg.Admin,
+			Powerful:  cfg.Powerful,
 			Config:    p,
 		}
 		summary := fmt.Sprintf(
-			"%s %s ok (transport %s, mode %s, writes=%t sends=%t admin=%t; config: clientId=%t clientSecret=%t).",
-			serverName, version, out.Transport, out.Mode, out.Writes, out.Sends, out.Admin, p.ClientID, p.ClientSecret)
+			"%s %s ok (transport %s, mode %s, writes=%t sends=%t admin=%t powerful=%t; config: clientId=%t clientSecret=%t).",
+			serverName, version, out.Transport, out.Mode, out.Writes, out.Sends, out.Admin, out.Powerful, p.ClientID, p.ClientSecret)
 		return text(summary), out, nil
 	})
 }
