@@ -8,6 +8,30 @@ by milestone.
 
 ### Added
 
+- **M8 — powerful-application tier (`--app-only`).** A tier whose `app_*` tools
+  take a required `user` target and act on that principal via a SEPARATE
+  service account's domain-wide delegation, reusing the DWD backend by injecting
+  the target into each call's context. Startup enforces the separation: the app
+  key (`GWS_APP_SA_KEY`) must differ from the resource-server DWD key, and a
+  requested-but-misconfigured tier is fatal (never a silent skip) — in both stdio
+  and HTTP transports, over the app tier's own `gapi.Client`. Per-user tools:
+  `app_list_messages`, `app_get_message`, `app_send_mail` (🔴),
+  `app_list_events`, `app_list_files`, `app_set_vacation` (🟡) — each
+  impersonating its own target (`fetchMessageDetail`, `listMessages`,
+  `listEventsFor` were extracted to serve both `me` and explicit users). Bulk
+  Directory lifecycle: `app_bulk_user_suspend` / `app_bulk_group_add_members`
+  (🟡) — impersonating the configured admin (`GWS_APP_ADMIN_SUBJECT`), with
+  per-item outcomes (one failure never aborts the batch) and up-front
+  duplicate-target rejection. **Requesting-actor logging** (`actor.go`): every
+  applied application-tier mutation is logged with the verified caller (resource
+  server) or `local` (stdio); the resource-server middleware now stamps the actor
+  alongside the impersonation target. Config gains `GWS_MCP_APP_ONLY` /
+  `GWS_APP_SA_KEY` / `GWS_APP_ADMIN_SUBJECT`, `RequireAppOnly` (separation),
+  `appScopes`, and app-key presence; health reports `appOnly`. Tests: target
+  impersonation, the send gate on `app_send_mail`, bulk per-item outcomes,
+  duplicate rejection, dry-run-makes-no-call, admin-subject requirement, and the
+  key-separation rule. No new dependencies.
+
 - **M7 — powerful-delegated tier (`--powerful`).** Fourteen end-user tools
   behind a registration switch (`GWS_MCP_POWERFUL`), each still honoring the
   write/send gates. Gmail settings: `gmail_get_vacation` / `gmail_set_vacation`

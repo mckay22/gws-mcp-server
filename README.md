@@ -18,8 +18,8 @@ built to the same principles:
   called over plain `net/http` with `fields` projection — no generated API
   clients, minimal PII in model context.
 
-> **Status: M7 (reads + gated writes/sends + Directory + governance + powerful
-> tier + resource-server mode).** Signs you in with your own Google account
+> **Status: M8 (reads + gated writes/sends + Directory + governance + powerful
+> tiers + resource-server mode).** Signs you in with your own Google account
 > (installed-app OAuth: loopback + PKCE) and acts as you across Gmail, Calendar,
 > and Drive: reads by default, gated mutations behind `--allow-writes`, and
 > irreversible/egress actions behind a separate `--allow-sends` (dry-run previews
@@ -29,9 +29,10 @@ built to the same principles:
 > resource server** (`--http`): it validates each request's bearer token against
 > any OIDC IdP (Keycloak, Entra, Google) and acts as the mapped caller via
 > domain-wide delegation. See [docs/auth.md](docs/auth.md) for the identity model
-> and [docs/capabilities.md](docs/capabilities.md) for the tools. Next: the
-> powerful-application tier (app acts against explicit user targets) and
-> packaging.
+> and [docs/capabilities.md](docs/capabilities.md) for the tools. Behind
+> `--app-only`: an application tier whose `app_*` tools act on an explicit `user`
+> target via a separate service account, logging the requesting actor. Next:
+> packaging (Docker, quickstart).
 
 ## Running (classic-delegated mode)
 
@@ -56,7 +57,9 @@ only the `health` tool registered.
 Flags: `--allow-writes` (write gate), `--allow-sends` (separate send gate),
 `--admin` (Admin SDK Directory/governance tools; needs an admin account),
 `--powerful` (end-user tools: Gmail settings, Tasks, People, Chat, Meet, Drive
-shared-with-me). Registration switches only add tools; they still honor the gates.
+shared-with-me), `--app-only` (application tier: `app_*` tools acting on an
+explicit `user` via a separate service account). Registration switches only add
+tools; they still honor the gates.
 
 | Variable | Purpose |
 | --- | --- |

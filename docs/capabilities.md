@@ -145,6 +145,30 @@ requested only when the switch is on.
 | `meet_conference_records` | 🟢 | Meet conference records (→ recordings/transcripts). |
 | `drive_shared_with_me` | 🟢 | Files others have shared with the user. |
 
+## Powerful-application tier (M8)
+
+Behind `--app-only` (or `GWS_MCP_APP_ONLY=true`), which requires its **own**
+service-account key (`GWS_APP_SA_KEY`) that **must differ** from the
+resource-server DWD key — enforced at startup, so a leaked resource-server key
+cannot escalate. Each tool takes a required `user` target and acts on that
+principal via the app SA's domain-wide delegation; the tools still honor the
+write/send gates. **Every applied mutation is logged with the requesting actor**
+(the verified caller in resource-server mode, or `local` on stdio).
+
+| Tool | Kind | Description |
+| --- | --- | --- |
+| `app_list_messages` | 🟢 | List a target user's messages. |
+| `app_get_message` | 🟢 | Get a target user's message (`full` adds the body). |
+| `app_send_mail` | 🔴 | Send mail **as** a target user. |
+| `app_list_events` | 🟢 | List a target user's calendar events. |
+| `app_list_files` | 🟢 | List a target user's Drive files. |
+| `app_set_vacation` | 🟡 | Set a target user's vacation responder. |
+| `app_bulk_user_suspend` | 🟡 | Suspend/un-suspend many users — per-item outcomes, duplicate targets rejected. |
+| `app_bulk_group_add_members` | 🟡 | Add many members to a group — per-item outcomes, duplicates rejected. |
+
+The bulk Directory tools impersonate the configured admin
+(`GWS_APP_ADMIN_SUBJECT`); the per-user tools impersonate their own target.
+
 ## Resource-server mode (M5)
 
 The same tool surface is also served over HTTP in multi-user mode (`--http

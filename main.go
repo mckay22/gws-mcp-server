@@ -39,6 +39,7 @@ func run() error {
 	allowSends := flag.Bool("allow-sends", false, "enable send-class tools (irreversible: mail send, sharing); off = dry-run previews. Separate from --allow-writes. Also GWS_MCP_ALLOW_SENDS=true.")
 	admin := flag.Bool("admin", false, "register the Admin SDK Directory tools and request admin.directory.*.readonly scopes; only useful when the signed-in user is an admin. Also GWS_MCP_ADMIN=true.")
 	powerful := flag.Bool("powerful", false, "register the powerful-delegated end-user tools (Gmail settings, Tasks, People, Chat, Meet, Drive shared-with-me); they still honor the write/send gates. Also GWS_MCP_POWERFUL=true.")
+	appOnly := flag.Bool("app-only", false, "register the powerful-application tier: app_* tools acting on an explicit user target via a SEPARATE service account (GWS_APP_SA_KEY, which must differ from GWS_DWD_SA_KEY). They still honor the write/send gates. Also GWS_MCP_APP_ONLY=true.")
 	flag.Parse()
 
 	// Protocol traffic owns stdout; structured diagnostics go to stderr only.
@@ -57,6 +58,9 @@ func run() error {
 	}
 	if *powerful {
 		cfg.Powerful = true // the flag ORs with GWS_MCP_POWERFUL.
+	}
+	if *appOnly {
+		cfg.AppOnly = true // the flag ORs with GWS_MCP_APP_ONLY.
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -82,27 +86,60 @@ func run() error {
 		"clientSecret", p.ClientSecret,
 	)
 
-	return newMCPServer(cfg).Run(ctx, &mcp.StdioTransport{})
+	server, err := newMCPServer(cfg)
+	if err != nil {
+		return err
+	}
+	return server.Run(ctx, &mcp.StdioTransport{})
 }
 
 // newMCPServer builds a server with every available tool registered. health is
-// always present. The Gmail read tools require classic-delegated credentials
+// always present. The delegated tools require classic-delegated credentials
 // (GWS_CLIENT_ID + GWS_CLIENT_SECRET); when they are absent the server still
-// starts with just health, and the Gmail tools light up once the OAuth client is
-// configured — mirroring the sibling entra-mcp-server. Sign-in itself is lazy:
-// it happens on the first Gmail tool call, never here.
-func newMCPServer(cfg config.Config) *mcp.Server {
+// starts with just health (and any app tier), and they light up once the OAuth
+// client is configured — mirroring the sibling entra-mcp-server. Sign-in is lazy:
+// it happens on the first delegated tool call, never here.
+//
+// The powerful-application tier is different: it is an explicit opt-in
+// (--app-only), so when requested-but-misconfigured the server fails to start
+// rather than silently running without it. It gets its OWN Google client over
+// its OWN service-account credential — never the delegated one — and is usable
+// standalone (no delegated credentials required).
+func newMCPServer(cfg config.Config) (*mcp.Server, error) {
 	server := mcp.NewServer(&mcp.Implementation{Name: serverName, Version: version}, nil)
 	registerHealth(server, cfg, "stdio")
+
+	if cfg.AppOnly {
+		appGC, err := buildAppClient(cfg)
+		if err != nil {
+			return nil, err
+		}
+		registerAppTools(server, appGC, cfg)
+	}
 
 	creds, err := googleauth.NewPersonal(cfg, requiredScopes(cfg))
 	if err != nil {
 		// No secret value is ever in this error — it reports missing config only.
-		slog.Warn("Gmail tools disabled until credentials are configured", "reason", err)
-		return server
+		slog.Warn("delegated tools disabled until credentials are configured", "reason", err)
+		return server, nil
 	}
 	registerTools(server, gapi.New(creds), cfg)
-	return server
+	return server, nil
+}
+
+// buildAppClient constructs the powerful-application tier's own Google client
+// from its own service-account credential, enforcing the separate-credential
+// rule (its key must differ from the resource-server DWD key). A misconfiguration
+// is a startup error, never a silent skip.
+func buildAppClient(cfg config.Config) (*gapi.Client, error) {
+	if err := cfg.RequireAppOnly(); err != nil {
+		return nil, fmt.Errorf("app-only tier requested but misconfigured: %w", err)
+	}
+	appDWD, err := googleauth.NewDWD(cfg.AppKeyPath, appScopes(cfg))
+	if err != nil {
+		return nil, fmt.Errorf("app-only tier requested but misconfigured: %w", err)
+	}
+	return gapi.New(appDWD), nil
 }
 
 // registerTools installs every Google-backed tool on the server: the read tools
@@ -150,6 +187,7 @@ type healthOutput struct {
 	Sends     bool            `json:"sends" jsonschema:"whether send-class tools are enabled (else they dry-run)"`
 	Admin     bool            `json:"admin" jsonschema:"whether the Admin SDK Directory/governance tools are registered"`
 	Powerful  bool            `json:"powerful" jsonschema:"whether the powerful-delegated end-user tools are registered"`
+	AppOnly   bool            `json:"appOnly" jsonschema:"whether the powerful-application (app_*) tools are registered"`
 	Config    config.Presence `json:"config" jsonschema:"which GWS_* variables are set (booleans only)"`
 }
 
@@ -169,11 +207,12 @@ func registerHealth(server *mcp.Server, cfg config.Config, transport string) {
 			Sends:     cfg.AllowSends,
 			Admin:     cfg.Admin,
 			Powerful:  cfg.Powerful,
+			AppOnly:   cfg.AppOnly,
 			Config:    p,
 		}
 		summary := fmt.Sprintf(
-			"%s %s ok (transport %s, mode %s, writes=%t sends=%t admin=%t powerful=%t; config: clientId=%t clientSecret=%t).",
-			serverName, version, out.Transport, out.Mode, out.Writes, out.Sends, out.Admin, out.Powerful, p.ClientID, p.ClientSecret)
+			"%s %s ok (transport %s, mode %s, writes=%t sends=%t admin=%t powerful=%t appOnly=%t; config: clientId=%t clientSecret=%t).",
+			serverName, version, out.Transport, out.Mode, out.Writes, out.Sends, out.Admin, out.Powerful, out.AppOnly, p.ClientID, p.ClientSecret)
 		return text(summary), out, nil
 	})
 }

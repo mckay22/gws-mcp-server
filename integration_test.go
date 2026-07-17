@@ -140,7 +140,7 @@ func newResourceServer(t *testing.T, fi *httpFakeIssuer) (*httptest.Server, conf
 	if err != nil {
 		t.Fatalf("dwd: %v", err)
 	}
-	srv := httptest.NewServer(mcpHTTPHandler(cfg, verifier, gapi.New(dwd)))
+	srv := httptest.NewServer(mcpHTTPHandler(cfg, verifier, gapi.New(dwd), nil))
 	t.Cleanup(srv.Close)
 	return srv, cfg
 }

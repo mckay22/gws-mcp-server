@@ -75,6 +75,25 @@ const (
 	// consumer accounts. Unset or anything other than "true" leaves them
 	// unregistered so lean deployments keep a small tool list.
 	EnvPowerful = "GWS_MCP_POWERFUL"
+
+	// EnvAppOnly enables the powerful-application tier: app_* tools that act on
+	// ANY principal via domain-wide delegation, targeting an explicit user
+	// parameter. Never the default; requires its OWN service account
+	// (EnvAppKeyPath) that must differ from the resource-server DWD key, so a
+	// leaked resource-server key cannot escalate. Like the other switches the
+	// tools still honor the write/send gates.
+	EnvAppOnly = "GWS_MCP_APP_ONLY"
+
+	// EnvAppKeyPath is the application tier's OWN domain-wide-delegation
+	// service-account JSON key path — never shared with the resource-server
+	// backend's key. Its contents are a domain credential and are never logged.
+	EnvAppKeyPath = "GWS_APP_SA_KEY"
+
+	// EnvAppAdminSubject is the admin user the application-tier SA impersonates
+	// for Directory admin operations (bulk user/group lifecycle). Per-user
+	// mailbox/calendar/drive tools impersonate their own target instead, so this
+	// is required only for the bulk directory tools.
+	EnvAppAdminSubject = "GWS_APP_ADMIN_SUBJECT"
 )
 
 // DefaultSubjectClaim is the token claim used to map a verified caller to a
@@ -146,6 +165,20 @@ type Config struct {
 	// tools still honor AllowWrites/AllowSends. Set by GWS_MCP_POWERFUL=true or
 	// --powerful; carries no secret.
 	Powerful bool
+
+	// AppOnly enables the powerful-application tier (app_* tools acting on an
+	// explicit user target). Registration only — the tools still honor the gates.
+	// Set by GWS_MCP_APP_ONLY=true or --app-only; requires AppKeyPath (see
+	// RequireAppOnly).
+	AppOnly bool
+
+	// AppKeyPath is the application tier's own DWD service-account key path. Its
+	// contents are never logged; expose presence via Presence.
+	AppKeyPath string
+
+	// AppAdminSubject is the admin user the application-tier SA impersonates for
+	// bulk Directory operations. It carries no secret.
+	AppAdminSubject string
 }
 
 // ConfigFromEnv builds a Config from the GWS_* environment variables. It does
@@ -154,16 +187,19 @@ type Config struct {
 // error.
 func ConfigFromEnv() Config {
 	return Config{
-		ClientID:       strings.TrimSpace(os.Getenv(EnvClientID)),
-		ClientSecret:   os.Getenv(EnvClientSecret),
-		AllowWrites:    boolFromEnv(EnvAllowWrites),
-		AllowSends:     boolFromEnv(EnvAllowSends),
-		Admin:          boolFromEnv(EnvAdmin),
-		Audience:       strings.TrimSpace(os.Getenv(EnvAudience)),
-		AllowedIssuers: listFromEnv(EnvIssuers),
-		DWDKeyPath:     strings.TrimSpace(os.Getenv(EnvDWDKeyPath)),
-		SubjectClaim:   strings.TrimSpace(os.Getenv(EnvSubjectClaim)),
-		Powerful:       boolFromEnv(EnvPowerful),
+		ClientID:        strings.TrimSpace(os.Getenv(EnvClientID)),
+		ClientSecret:    os.Getenv(EnvClientSecret),
+		AllowWrites:     boolFromEnv(EnvAllowWrites),
+		AllowSends:      boolFromEnv(EnvAllowSends),
+		Admin:           boolFromEnv(EnvAdmin),
+		Audience:        strings.TrimSpace(os.Getenv(EnvAudience)),
+		AllowedIssuers:  listFromEnv(EnvIssuers),
+		DWDKeyPath:      strings.TrimSpace(os.Getenv(EnvDWDKeyPath)),
+		SubjectClaim:    strings.TrimSpace(os.Getenv(EnvSubjectClaim)),
+		Powerful:        boolFromEnv(EnvPowerful),
+		AppOnly:         boolFromEnv(EnvAppOnly),
+		AppKeyPath:      strings.TrimSpace(os.Getenv(EnvAppKeyPath)),
+		AppAdminSubject: strings.TrimSpace(os.Getenv(EnvAppAdminSubject)),
 	}
 }
 
@@ -193,6 +229,7 @@ type Presence struct {
 	ClientID     bool `json:"clientId" jsonschema:"whether GWS_CLIENT_ID is set"`
 	ClientSecret bool `json:"clientSecret" jsonschema:"whether GWS_CLIENT_SECRET is set"`
 	DWDKey       bool `json:"dwdKey,omitempty" jsonschema:"whether GWS_DWD_SA_KEY (resource-server DWD key) is set"`
+	AppKey       bool `json:"appKey,omitempty" jsonschema:"whether GWS_APP_SA_KEY (application-tier key) is set"`
 }
 
 // Presence reports which GWS_* variables are set without exposing any value.
@@ -201,6 +238,7 @@ func (c Config) Presence() Presence {
 		ClientID:     c.ClientID != "",
 		ClientSecret: strings.TrimSpace(c.ClientSecret) != "",
 		DWDKey:       c.DWDKeyPath != "",
+		AppKey:       c.AppKeyPath != "",
 	}
 }
 
@@ -244,6 +282,21 @@ func (c Config) RequireResourceServer() error {
 // Issuers returns the trusted OIDC issuer allowlist for the verifier.
 func (c Config) Issuers() []string {
 	return c.AllowedIssuers
+}
+
+// RequireAppOnly validates the powerful-application tier: its own service-account
+// key must be configured, and it must be a SEPARATE key from the resource-server
+// DWD key (GWS_DWD_SA_KEY) — the tiers never share a credential, so a leaked
+// resource-server key cannot escalate to the application tier. It reports only
+// variable names, never any value.
+func (c Config) RequireAppOnly() error {
+	if strings.TrimSpace(c.AppKeyPath) == "" {
+		return fmt.Errorf("app-only mode requires %s", EnvAppKeyPath)
+	}
+	if d := strings.TrimSpace(c.DWDKeyPath); d != "" && d == strings.TrimSpace(c.AppKeyPath) {
+		return fmt.Errorf("%s must be a SEPARATE key from %s — the application tier never shares the resource-server credential", EnvAppKeyPath, EnvDWDKeyPath)
+	}
+	return nil
 }
 
 // SubjectClaimOrDefault returns the configured token claim to map to a Google

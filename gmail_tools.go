@@ -153,7 +153,7 @@ func registerListMessages(server *mcp.Server, gc *gapi.Client) {
 		Title:       "List Gmail messages",
 		Description: "List messages in the signed-in mailbox, most recent first. Optionally filter by a Gmail search query and/or label ids. Returns message + thread ids only (metadata is fetched per-message via get_message); page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listMessagesInput) (*mcp.CallToolResult, messageListOutput, error) {
-		out, err := listMessages(ctx, gc, in.Query, in.LabelIDs, in.MaxResults, in.PageToken, in.IncludeSpamTrash)
+		out, err := listMessages(ctx, gc, "me", in.Query, in.LabelIDs, in.MaxResults, in.PageToken, in.IncludeSpamTrash)
 		if err != nil {
 			return nil, messageListOutput{}, err
 		}
@@ -170,7 +170,7 @@ func registerSearchMessages(server *mcp.Server, gc *gapi.Client) {
 		if strings.TrimSpace(in.Query) == "" {
 			return nil, messageListOutput{}, fmt.Errorf("query is required")
 		}
-		out, err := listMessages(ctx, gc, in.Query, in.LabelIDs, in.MaxResults, in.PageToken, in.IncludeSpamTrash)
+		out, err := listMessages(ctx, gc, "me", in.Query, in.LabelIDs, in.MaxResults, in.PageToken, in.IncludeSpamTrash)
 		if err != nil {
 			return nil, messageListOutput{}, err
 		}
@@ -178,10 +178,11 @@ func registerSearchMessages(server *mcp.Server, gc *gapi.Client) {
 	})
 }
 
-// listMessages is the shared body of list_messages and search_messages: it calls
-// Gmail users.messages.list with the given filters and returns one bounded page,
+// listMessages is the shared body of list_messages, search_messages, and
+// app_list_messages: it calls Gmail users.messages.list for the given user ("me"
+// or an explicit address) with the given filters and returns one bounded page,
 // exposing nextPageToken for caller-driven continuation.
-func listMessages(ctx context.Context, gc *gapi.Client, query string, labelIDs []string, maxResults int, pageToken string, includeSpamTrash bool) (messageListOutput, error) {
+func listMessages(ctx context.Context, gc *gapi.Client, user, query string, labelIDs []string, maxResults int, pageToken string, includeSpamTrash bool) (messageListOutput, error) {
 	q := url.Values{}
 	q.Set("maxResults", strconv.Itoa(clampLimit(maxResults)))
 	q.Set("fields", messageListFields)
@@ -200,7 +201,7 @@ func listMessages(ctx context.Context, gc *gapi.Client, query string, labelIDs [
 		q.Set("includeSpamTrash", "true")
 	}
 
-	raw, err := gc.Get(ctx, gapi.BaseGmail, "/users/me/messages", q)
+	raw, err := gc.Get(ctx, gapi.BaseGmail, "/users/"+url.PathEscape(user)+"/messages", q)
 	if err != nil {
 		return messageListOutput{}, toolError(err)
 	}
@@ -269,69 +270,79 @@ func registerGetMessage(server *mcp.Server, gc *gapi.Client) {
 		Title:       "Get Gmail message",
 		Description: "Fetch a single message by id. Default 'metadata' format returns the common headers (From/To/Cc/Subject/Date) plus the snippet; 'full' also returns the decoded plain-text body (capped at 100 KiB). Use ids from list_messages/search_messages.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in getMessageInput) (*mcp.CallToolResult, MessageDetail, error) {
-		if strings.TrimSpace(in.ID) == "" {
-			return nil, MessageDetail{}, fmt.Errorf("id is required")
-		}
-		format := strings.ToLower(strings.TrimSpace(in.Format))
-		if format == "" {
-			format = "metadata"
-		}
-		if format != "metadata" && format != "full" {
-			return nil, MessageDetail{}, fmt.Errorf("format must be 'metadata' or 'full', got %q", in.Format)
-		}
-
-		q := url.Values{}
-		q.Set("format", format)
-		if format == "metadata" {
-			q.Set("fields", messageMetaFields)
-			for _, h := range metadataHeaders {
-				q.Add("metadataHeaders", h)
-			}
-		} else {
-			q.Set("fields", messageFullFields)
-		}
-
-		raw, err := gc.Get(ctx, gapi.BaseGmail, "/users/me/messages/"+url.PathEscape(in.ID), q)
+		detail, err := fetchMessageDetail(ctx, gc, "me", in.ID, in.Format)
 		if err != nil {
-			return nil, MessageDetail{}, toolError(err)
+			return nil, MessageDetail{}, err
 		}
-
-		var msg struct {
-			ID           string    `json:"id"`
-			ThreadID     string    `json:"threadId"`
-			LabelIDs     []string  `json:"labelIds"`
-			Snippet      string    `json:"snippet"`
-			SizeEstimate int       `json:"sizeEstimate"`
-			Payload      gmailPart `json:"payload"`
-		}
-		if err := json.Unmarshal(raw, &msg); err != nil {
-			return nil, MessageDetail{}, fmt.Errorf("decoding message: %w", err)
-		}
-
-		detail := MessageDetail{
-			ID:           msg.ID,
-			ThreadID:     msg.ThreadID,
-			LabelIDs:     msg.LabelIDs,
-			Snippet:      msg.Snippet,
-			SizeEstimate: msg.SizeEstimate,
-			From:         headerValue(msg.Payload.Headers, "From"),
-			To:           headerValue(msg.Payload.Headers, "To"),
-			Cc:           headerValue(msg.Payload.Headers, "Cc"),
-			Subject:      headerValue(msg.Payload.Headers, "Subject"),
-			Date:         headerValue(msg.Payload.Headers, "Date"),
-		}
-		if format == "full" {
-			body, truncated := plainTextBody(msg.Payload)
-			detail.Body = body
-			detail.BodyTruncated = truncated
-		}
-
 		summary := detail.Subject
 		if summary == "" {
 			summary = detail.Snippet
 		}
 		return text(fmt.Sprintf("%s — %s", detail.From, summary)), detail, nil
 	})
+}
+
+// fetchMessageDetail fetches and summarizes one Gmail message for the given user
+// ("me" for the signed-in user, or an explicit address for the application
+// tier), validating the format. It is shared by get_message and app_get_message.
+func fetchMessageDetail(ctx context.Context, gc *gapi.Client, user, id, format string) (MessageDetail, error) {
+	if strings.TrimSpace(id) == "" {
+		return MessageDetail{}, fmt.Errorf("id is required")
+	}
+	format = strings.ToLower(strings.TrimSpace(format))
+	if format == "" {
+		format = "metadata"
+	}
+	if format != "metadata" && format != "full" {
+		return MessageDetail{}, fmt.Errorf("format must be 'metadata' or 'full', got %q", format)
+	}
+
+	q := url.Values{}
+	q.Set("format", format)
+	if format == "metadata" {
+		q.Set("fields", messageMetaFields)
+		for _, h := range metadataHeaders {
+			q.Add("metadataHeaders", h)
+		}
+	} else {
+		q.Set("fields", messageFullFields)
+	}
+
+	raw, err := gc.Get(ctx, gapi.BaseGmail, "/users/"+url.PathEscape(user)+"/messages/"+url.PathEscape(id), q)
+	if err != nil {
+		return MessageDetail{}, toolError(err)
+	}
+
+	var msg struct {
+		ID           string    `json:"id"`
+		ThreadID     string    `json:"threadId"`
+		LabelIDs     []string  `json:"labelIds"`
+		Snippet      string    `json:"snippet"`
+		SizeEstimate int       `json:"sizeEstimate"`
+		Payload      gmailPart `json:"payload"`
+	}
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return MessageDetail{}, fmt.Errorf("decoding message: %w", err)
+	}
+
+	detail := MessageDetail{
+		ID:           msg.ID,
+		ThreadID:     msg.ThreadID,
+		LabelIDs:     msg.LabelIDs,
+		Snippet:      msg.Snippet,
+		SizeEstimate: msg.SizeEstimate,
+		From:         headerValue(msg.Payload.Headers, "From"),
+		To:           headerValue(msg.Payload.Headers, "To"),
+		Cc:           headerValue(msg.Payload.Headers, "Cc"),
+		Subject:      headerValue(msg.Payload.Headers, "Subject"),
+		Date:         headerValue(msg.Payload.Headers, "Date"),
+	}
+	if format == "full" {
+		body, truncated := plainTextBody(msg.Payload)
+		detail.Body = body
+		detail.BodyTruncated = truncated
+	}
+	return detail, nil
 }
 
 // headerValue returns the first header whose name matches (case-insensitively),

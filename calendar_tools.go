@@ -148,52 +148,67 @@ func registerListEvents(server *mcp.Server, gc *gapi.Client) {
 		Title:       "List calendar events",
 		Description: "List events in a calendar within a time window, expanded to single instances and ordered by start time. Defaults to the primary calendar and the next 30 days. Returns one page; page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listEventsInput) (*mcp.CallToolResult, listEventsOutput, error) {
-		now := time.Now()
-		timeMin, err := rfc3339OrDefault(in.TimeMin, now)
+		out, err := listEventsFor(ctx, gc, calendarOrPrimary(in.CalendarID), in.TimeMin, in.TimeMax, in.Query, in.MaxResults, in.PageToken)
 		if err != nil {
 			return nil, listEventsOutput{}, err
 		}
-		base, _ := time.Parse(time.RFC3339, timeMin)
-		timeMax, err := rfc3339OrDefault(in.TimeMax, base.AddDate(0, 0, defaultEventWindowDays))
-		if err != nil {
-			return nil, listEventsOutput{}, err
-		}
-
-		calendarID := calendarOrPrimary(in.CalendarID)
-		q := url.Values{}
-		q.Set("singleEvents", "true")
-		q.Set("orderBy", "startTime")
-		q.Set("timeMin", timeMin)
-		q.Set("timeMax", timeMax)
-		q.Set("maxResults", strconv.Itoa(clampLimit(in.MaxResults)))
-		q.Set("fields", eventListFields)
-		if s := strings.TrimSpace(in.Query); s != "" {
-			q.Set("q", s)
-		}
-		if in.PageToken != "" {
-			q.Set("pageToken", in.PageToken)
-		}
-
-		raw, err := gc.Get(ctx, gapi.BaseCalendar, "/calendars/"+url.PathEscape(calendarID)+"/events", q)
-		if err != nil {
-			return nil, listEventsOutput{}, toolError(err)
-		}
-		var env struct {
-			Items         []Event `json:"items"`
-			NextPageToken string  `json:"nextPageToken"`
-		}
-		if err := json.Unmarshal(raw, &env); err != nil {
-			return nil, listEventsOutput{}, fmt.Errorf("decoding events: %w", err)
-		}
-		out := listEventsOutput{
-			Events:        env.Items,
-			Count:         len(env.Items),
-			TimeMin:       timeMin,
-			TimeMax:       timeMax,
-			NextPageToken: env.NextPageToken,
-		}
-		return text(fmt.Sprintf("%d events between %s and %s", out.Count, timeMin, timeMax)), out, nil
+		return text(fmt.Sprintf("%d events between %s and %s", out.Count, out.TimeMin, out.TimeMax)), out, nil
 	})
+}
+
+// listEventsFor lists a windowed, single-instance, start-ordered page of events
+// for a calendar. It is shared by list_events and app_list_events. Blank time
+// bounds default (now / +30 days); a malformed bound is an error.
+func listEventsFor(ctx context.Context, gc *gapi.Client, calendarID, timeMinIn, timeMaxIn, query string, maxResults int, pageToken string) (listEventsOutput, error) {
+	now := time.Now()
+	timeMin, err := rfc3339OrDefault(timeMinIn, now)
+	if err != nil {
+		return listEventsOutput{}, err
+	}
+	base, _ := time.Parse(time.RFC3339, timeMin)
+	timeMax, err := rfc3339OrDefault(timeMaxIn, base.AddDate(0, 0, defaultEventWindowDays))
+	if err != nil {
+		return listEventsOutput{}, err
+	}
+
+	q := url.Values{}
+	q.Set("singleEvents", "true")
+	q.Set("orderBy", "startTime")
+	q.Set("timeMin", timeMin)
+	q.Set("timeMax", timeMax)
+	q.Set("maxResults", strconv.Itoa(clampLimit(maxResults)))
+	q.Set("fields", eventListFields)
+	if s := strings.TrimSpace(query); s != "" {
+		q.Set("q", s)
+	}
+	if pageToken != "" {
+		q.Set("pageToken", pageToken)
+	}
+
+	raw, err := gc.Get(ctx, gapi.BaseCalendar, "/calendars/"+url.PathEscape(calendarID)+"/events", q)
+	if err != nil {
+		return listEventsOutput{}, toolError(err)
+	}
+	var env struct {
+		Items         []Event `json:"items"`
+		NextPageToken string  `json:"nextPageToken"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return listEventsOutput{}, fmt.Errorf("decoding events: %w", err)
+	}
+	return listEventsOutput{
+		Events:        env.Items,
+		Count:         len(env.Items),
+		TimeMin:       timeMin,
+		TimeMax:       timeMax,
+		NextPageToken: env.NextPageToken,
+	}, nil
+}
+
+// listPrimaryEvents is the app tier's convenience wrapper: events on the target
+// user's primary calendar.
+func listPrimaryEvents(ctx context.Context, gc *gapi.Client, timeMin, timeMax string, maxResults int, pageToken string) (listEventsOutput, error) {
+	return listEventsFor(ctx, gc, "primary", timeMin, timeMax, "", maxResults, pageToken)
 }
 
 // --- get_event ---

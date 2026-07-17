@@ -15,7 +15,10 @@ import (
 func connectServer(t *testing.T, cfg config.Config) *mcp.ClientSession {
 	t.Helper()
 	ctx := context.Background()
-	server := newMCPServer(cfg)
+	server, err := newMCPServer(cfg)
+	if err != nil {
+		t.Fatalf("newMCPServer: %v", err)
+	}
 
 	t1, t2 := mcp.NewInMemoryTransports()
 	if _, err := server.Connect(ctx, t1, nil); err != nil {

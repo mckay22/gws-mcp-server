@@ -52,6 +52,17 @@ func serveHTTP(ctx context.Context, addr string, cfg config.Config) error {
 	}
 	gc := gapi.New(dwd)
 
+	// The powerful-application tier is an explicit opt-in with its OWN service
+	// account; requested-but-broken config fails startup rather than silently
+	// running without it.
+	var appGC *gapi.Client
+	if cfg.AppOnly {
+		appGC, err = buildAppClient(cfg)
+		if err != nil {
+			return err
+		}
+	}
+
 	bind, err := resolveBindAddr(addr, cfg.ResourceServerMode())
 	if err != nil {
 		return err
@@ -59,7 +70,7 @@ func serveHTTP(ctx context.Context, addr string, cfg config.Config) error {
 
 	httpServer := &http.Server{
 		Addr:              bind,
-		Handler:           mcpHTTPHandler(cfg, verifier, gc),
+		Handler:           mcpHTTPHandler(cfg, verifier, gc, appGC),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -98,10 +109,16 @@ func serveHTTP(ctx context.Context, addr string, cfg config.Config) error {
 // Google user is then carried into each tool call's context (userMiddleware) so
 // the DWD backend impersonates that user. The metadata endpoint is deliberately
 // unauthenticated so a client can discover where to obtain a token.
-func mcpHTTPHandler(cfg config.Config, verifier *oidcauth.Verifier, gc *gapi.Client) http.Handler {
+func mcpHTTPHandler(cfg config.Config, verifier *oidcauth.Verifier, gc *gapi.Client, appGC *gapi.Client) http.Handler {
 	server := mcp.NewServer(&mcp.Implementation{Name: serverName, Version: version}, nil)
 	registerHealth(server, cfg, "http")
 	registerTools(server, gc, cfg)
+	if appGC != nil {
+		// The application tier's own client (its own SA), separate from the
+		// delegated one; its app_* tools log each applied mutation with the
+		// verified caller as the requesting actor.
+		registerAppTools(server, appGC, cfg)
+	}
 	server.AddReceivingMiddleware(userMiddleware)
 
 	streamable := mcp.NewStreamableHTTPHandler(
@@ -161,7 +178,12 @@ func userMiddleware(next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 		if extra := req.GetExtra(); extra != nil && extra.TokenInfo != nil {
 			if u, ok := extra.TokenInfo.Extra[userKey].(string); ok {
+				// The mapped caller is both the delegated impersonation target and
+				// the requesting actor for application-tier mutation logging. App
+				// tools override the impersonation target per call but keep the
+				// actor, so audit records the human who asked.
 				ctx = googleauth.WithUser(ctx, u)
+				ctx = withActor(ctx, u)
 			}
 		}
 		return next(ctx, method, req)

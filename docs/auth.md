@@ -87,11 +87,24 @@ Trade-off: no domain credential, but it costs state management and a linking
 flow. The default deployment implements DWD first (org deployments); linking is
 deferred until a consumer multi-user need appears (tracked as M5b).
 
-## Tier 3 — powerful-application (opt-in, explicit) — later milestone
+## Tier 3 — powerful-application (opt-in, explicit)
 
-Its own service account with its own DWD grant (never shared with the
-resource-server backend's SA), tools that take an explicit `user` target, and
-requesting-actor logging on every applied mutation. Lands in M8.
+Selected by `--app-only` (`GWS_MCP_APP_ONLY`). It has its **own** service account
+(`GWS_APP_SA_KEY`) with its own DWD grant, which **must differ** from the
+resource-server backend's key — enforced at startup, so a leaked resource-server
+credential cannot escalate to the application tier.
+
+The `app_*` tools take a required `user` parameter and act on that principal via
+the app SA's domain-wide delegation (reusing the DWD backend by injecting the
+target user into the call context). Per-user tools (mailbox, calendar, Drive,
+vacation) impersonate their own target; the bulk Directory tools impersonate a
+configured admin (`GWS_APP_ADMIN_SUBJECT`) because directory admin operations
+need admin rights. Both gates still apply.
+
+**Requesting-actor logging.** Google's audit attributes a DWD action to the
+*impersonated* user, so every applied application-tier mutation is additionally
+logged here with the requesting actor — the verified caller (resource-server
+mode) or `local` (stdio). That log is where the real requester is recorded.
 
 ## Permission model (unchanged principle)
 
