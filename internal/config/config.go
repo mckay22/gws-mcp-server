@@ -36,6 +36,15 @@ const (
 	// preview instead of calling Google. Opening the write gate does not open
 	// this one.
 	EnvAllowSends = "GWS_MCP_ALLOW_SENDS"
+
+	// EnvAdmin registers the Admin SDK Directory tools (users, groups, members,
+	// admin roles) and requests the sensitive admin.directory.*.readonly scopes.
+	// It is a REGISTRATION switch, not a gate: it only makes sense when the
+	// signed-in user holds a Workspace/Cloud Identity admin role, so it is opt-in
+	// — consumer @gmail.com accounts leave it off and keep a lean tool list.
+	// Unset or anything other than "true" (case-insensitive) leaves the directory
+	// tools unregistered and their scopes unrequested.
+	EnvAdmin = "GWS_MCP_ADMIN"
 )
 
 // ModeClassicDelegated is the default operating mode: you sign in with your own
@@ -68,6 +77,12 @@ type Config struct {
 	// if AllowWrites is true. It is set by GWS_MCP_ALLOW_SENDS=true
 	// (case-insensitive) and carries no secret.
 	AllowSends bool
+
+	// Admin registers the Admin SDK Directory tools and requests the admin
+	// directory readonly scopes. Registration only — a directory read still
+	// requires the signed-in user to hold the matching admin privilege, which
+	// Google enforces. Set by GWS_MCP_ADMIN=true or --admin; carries no secret.
+	Admin bool
 }
 
 // ConfigFromEnv builds a Config from the GWS_* environment variables. It does
@@ -80,6 +95,7 @@ func ConfigFromEnv() Config {
 		ClientSecret: os.Getenv(EnvClientSecret),
 		AllowWrites:  boolFromEnv(EnvAllowWrites),
 		AllowSends:   boolFromEnv(EnvAllowSends),
+		Admin:        boolFromEnv(EnvAdmin),
 	}
 }
 

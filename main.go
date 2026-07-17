@@ -36,6 +36,7 @@ func main() {
 func run() error {
 	allowWrites := flag.Bool("allow-writes", false, "enable the write tools (mutations); off = dry-run previews. Also settable via GWS_MCP_ALLOW_WRITES=true.")
 	allowSends := flag.Bool("allow-sends", false, "enable send-class tools (irreversible: mail send, sharing); off = dry-run previews. Separate from --allow-writes. Also GWS_MCP_ALLOW_SENDS=true.")
+	admin := flag.Bool("admin", false, "register the Admin SDK Directory tools and request admin.directory.*.readonly scopes; only useful when the signed-in user is an admin. Also GWS_MCP_ADMIN=true.")
 	flag.Parse()
 
 	// Protocol traffic owns stdout; structured diagnostics go to stderr only.
@@ -48,6 +49,9 @@ func run() error {
 	}
 	if *allowSends {
 		cfg.AllowSends = true // the flag ORs with GWS_MCP_ALLOW_SENDS.
+	}
+	if *admin {
+		cfg.Admin = true // the flag ORs with GWS_MCP_ADMIN.
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -96,6 +100,10 @@ func newMCPServer(cfg config.Config) *mcp.Server {
 	registerGmailWriteTools(server, gc, cfg.AllowWrites, cfg.AllowSends)
 	registerCalendarWriteTools(server, gc, cfg.AllowWrites, cfg.AllowSends)
 	registerDriveWriteTools(server, gc, cfg.AllowWrites, cfg.AllowSends)
+	// Admin SDK Directory reads (opt-in registration via --admin).
+	if cfg.Admin {
+		registerDirectoryReadTools(server, gc)
+	}
 	return server
 }
 
@@ -112,6 +120,7 @@ type healthOutput struct {
 	Mode      string          `json:"mode" jsonschema:"the operating mode (classic-delegated)"`
 	Writes    bool            `json:"writes" jsonschema:"whether the write tools are enabled (else they dry-run)"`
 	Sends     bool            `json:"sends" jsonschema:"whether send-class tools are enabled (else they dry-run)"`
+	Admin     bool            `json:"admin" jsonschema:"whether the Admin SDK Directory tools are registered"`
 	Config    config.Presence `json:"config" jsonschema:"which GWS_* variables are set (booleans only)"`
 }
 
@@ -129,11 +138,12 @@ func registerHealth(server *mcp.Server, cfg config.Config) {
 			Mode:      cfg.Mode(),
 			Writes:    cfg.AllowWrites,
 			Sends:     cfg.AllowSends,
+			Admin:     cfg.Admin,
 			Config:    p,
 		}
 		summary := fmt.Sprintf(
-			"%s %s ok (transport stdio, mode %s, writes=%t sends=%t; config: clientId=%t clientSecret=%t).",
-			serverName, version, out.Mode, out.Writes, out.Sends, p.ClientID, p.ClientSecret)
+			"%s %s ok (transport stdio, mode %s, writes=%t sends=%t admin=%t; config: clientId=%t clientSecret=%t).",
+			serverName, version, out.Mode, out.Writes, out.Sends, out.Admin, p.ClientID, p.ClientSecret)
 		return text(summary), out, nil
 	})
 }

@@ -32,6 +32,12 @@ const (
 	// mail as the user. (Calendar/Drive send-class actions reuse the write-gated
 	// scopes above; the send gate governs whether they are invoked.)
 	scopeGmailSend = "https://www.googleapis.com/auth/gmail.send"
+
+	// Admin SDK Directory read scopes (M4), requested only when --admin is on.
+	scopeAdminUserReadonly     = "https://www.googleapis.com/auth/admin.directory.user.readonly"
+	scopeAdminGroupReadonly    = "https://www.googleapis.com/auth/admin.directory.group.readonly"
+	scopeAdminGroupMemberRO    = "https://www.googleapis.com/auth/admin.directory.group.member.readonly"
+	scopeAdminRoleMgmtReadonly = "https://www.googleapis.com/auth/admin.directory.rolemanagement.readonly"
 )
 
 // requiredScopes returns the OAuth scopes the currently-enabled tools need.
@@ -50,6 +56,14 @@ func requiredScopes(cfg config.Config) []string {
 	}
 	if cfg.AllowSends {
 		scopes = append(scopes, scopeGmailSend)
+	}
+	if cfg.Admin {
+		scopes = append(scopes,
+			scopeAdminUserReadonly,
+			scopeAdminGroupReadonly,
+			scopeAdminGroupMemberRO,
+			scopeAdminRoleMgmtReadonly,
+		)
 	}
 	return scopes
 }

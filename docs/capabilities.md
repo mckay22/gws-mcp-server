@@ -85,8 +85,24 @@ The Calendar **attendee split is the gate split**: an appointment with no
 attendees notifies no one (write gate); anything that emails attendees or the
 organizer is send-gated.
 
+## Directory — reads (M4, Admin SDK)
+
+Registered only with `--admin` (or `GWS_MCP_ADMIN=true`), which also requests the
+`admin.directory.*.readonly` scopes. These need the signed-in user to hold a
+Workspace/Cloud Identity admin role; consumer `@gmail.com` accounts leave the
+switch off. Google enforces the caller's admin privileges on every call.
+
+| Tool | Kind | Description |
+| --- | --- | --- |
+| `directory_users_search` | 🟢 | Search/list directory users (Admin SDK query syntax). Compact summaries; `nextPageToken`. |
+| `directory_user_get` | 🟢 | One user by email/id: aliases, org unit, admin flags, 2SV enrollment. |
+| `directory_groups_search` | 🟢 | Search/list groups, optionally those a given user belongs to. |
+| `directory_group_members` | 🟢 | A group's members with role (OWNER/MANAGER/MEMBER) and type. |
+| `directory_roles_list` | 🟢 | Admin roles (system + custom), flagging super-admin. |
+| `directory_role_assignments` | 🟢 | Who holds which admin role, filterable by user or role id. |
+
 ## Later milestones
 
-Directory (Admin SDK), governance (Reports/audit), the powerful-delegated and
+Governance (Reports/audit, Directory writes), the powerful-delegated and
 powerful-application tiers, and the multi-user resource-server mode land in
 subsequent milestones.

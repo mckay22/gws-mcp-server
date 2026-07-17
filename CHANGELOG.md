@@ -8,6 +8,21 @@ by milestone.
 
 ### Added
 
+- **M4 — Directory reads (Admin SDK).** Six read-only Directory tools:
+  `directory_users_search`, `directory_user_get`, `directory_groups_search`,
+  `directory_group_members`, `directory_roles_list`, and
+  `directory_role_assignments`, all against `customer=my_customer` with `fields`
+  projection and `nextPageToken` paging. Registered only behind a new `--admin`
+  switch (`GWS_MCP_ADMIN`) — a registration switch, not a gate — which also adds
+  the `admin.directory.{user,group,group.member,rolemanagement}.readonly`
+  scopes, so consumer accounts keep a lean tool list and never consent to admin
+  scopes. In classic-delegated mode these act as the signed-in admin user;
+  Google enforces the caller's admin privileges (the SA-with-admin-role vs DWD
+  question is deferred to the resource-server/application tiers). health now
+  reports `admin`. `BaseDirectory` added. Recording-mock tests cover each tool,
+  query wiring, not-found handling, and that the tools stay unregistered without
+  `--admin`. No new dependencies.
+
 - **M3 — gated writes + sends.** The two-gate safety model ported from
   entra-mcp-server, adapted for Google. `write.go` adds `writePlan`/`runWrite`:
   a tool builds one plan (method, service base, path, query, body) and hands it

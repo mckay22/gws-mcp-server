@@ -48,8 +48,9 @@ redirects to a loopback address, and the token is held in memory for the
 process's lifetime. With no credentials configured the server still starts, with
 only the `health` tool registered.
 
-Flags: `--allow-writes` (write gate), `--allow-sends` (separate send gate) —
-no gated tools exist yet; the flags establish the contract.
+Flags: `--allow-writes` (write gate), `--allow-sends` (separate send gate),
+`--admin` (register Admin SDK Directory tools; only useful when the signed-in
+user is a Workspace/Cloud Identity admin).
 
 | Variable | Purpose |
 | --- | --- |

@@ -47,6 +47,10 @@ const (
 	// BaseDriveUpload is Drive's separate upload host, used for file uploads
 	// (uploadType=multipart/media); metadata operations use BaseDrive.
 	BaseDriveUpload = "https://www.googleapis.com/upload/drive/v3"
+
+	// BaseDirectory is the Admin SDK Directory API v1 base, e.g. "/users" or
+	// "/groups/{key}/members".
+	BaseDirectory = "https://admin.googleapis.com/admin/directory/v1"
 )
 
 const (
