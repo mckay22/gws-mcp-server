@@ -21,6 +21,25 @@ API call shapes) on top of the first pass below.
   impersonation target) but never cancels. Regression-tested by cancelling the
   first request's context and asserting the captured context stays live and
   keeps its user value.
+- **(High, spec compliance) A 401 now advertises where to get a token.** The MCP
+  authorization spec requires a resource server to return `WWW-Authenticate` on a
+  401 naming its protected-resource metadata (RFC 9728 §5.1); the bearer
+  middleware was wired with no options, so the header was never emitted and the
+  metadata document — though served — was undiscoverable. The header now carries
+  `resource_metadata`, derived from the audience. Scopes are still not enforced
+  locally: Google remains the authority.
+- **(Medium) Metadata is served at the RFC 9728 path-appended location.** For an
+  audience of `https://host/mcp` the document now answers at
+  `/.well-known/oauth-protected-resource/mcp` as well as the bare well-known
+  path, so a client deriving either form succeeds. It also answers CORS
+  preflight and sends `Access-Control-Allow-Origin`, which browser-based clients
+  need to run discovery. An identifier-style audience (`api://…`) advertises no
+  metadata URL rather than an unfetchable one.
+- **(Medium) Cross-origin protection on the MCP endpoint.** The streamable HTTP
+  handler is wrapped in `net/http`'s `CrossOriginProtection` (the SDK applies
+  none by default in v1.6.x), rejecting cross-origin browser requests as
+  defence-in-depth against DNS rebinding and CSRF. Non-browser clients, which
+  send neither `Origin` nor `Sec-Fetch-Site`, are unaffected.
 
 ### Fixed / Security (post-M9 review)
 

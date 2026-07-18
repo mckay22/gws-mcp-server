@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -129,13 +130,86 @@ func mcpHTTPHandler(cfg config.Config, verifier *oidcauth.Verifier, gc *gapi.Cli
 		},
 	)
 
-	handler := sdkauth.RequireBearerToken(bearerVerifier(verifier), nil)(streamable)
+	// Cross-origin protection (CSRF / DNS-rebinding defence in depth). The SDK
+	// applies none by default in v1.6.x and its own option is deprecated in favor
+	// of wrapping the handler, which is what this does. Safe methods and requests
+	// with neither Sec-Fetch-Site nor Origin (i.e. non-browser clients) are
+	// allowed through, so ordinary MCP clients are unaffected.
+	protected := http.NewCrossOriginProtection().Handler(streamable)
+
+	// RFC 9728 / MCP authorization: a 401 MUST carry a WWW-Authenticate header
+	// naming this server's protected-resource metadata, which is how a compliant
+	// client discovers where to obtain a token. Scopes are deliberately NOT
+	// enforced here — Google remains the authority on what the caller may do, and
+	// this server builds no parallel permission model; the advertised scope is
+	// informational, in the metadata document only.
+	handler := sdkauth.RequireBearerToken(bearerVerifier(verifier), &sdkauth.RequireBearerTokenOptions{
+		ResourceMetadataURL: resourceMetadataURL(cfg.Audience),
+	})(protected)
 
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", handler)
 	mux.Handle("/mcp/", handler)
-	mux.HandleFunc("GET /.well-known/oauth-protected-resource", resourceMetadataHandler(cfg))
+
+	// Serve the metadata document at the RFC 9728 path-appended location derived
+	// from the resource identifier (e.g. audience https://host/mcp is described at
+	// /.well-known/oauth-protected-resource/mcp) and, when that differs, at the
+	// bare well-known path too — so a client deriving either form finds it.
+	metadata := resourceMetadataHandler(cfg)
+	for _, p := range metadataPaths(cfg.Audience) {
+		mux.HandleFunc("GET "+p, metadata)
+		mux.HandleFunc("OPTIONS "+p, metadata) // CORS preflight for browser clients
+	}
 	return mux
+}
+
+// defaultResourceMetadataPath is the RFC 9728 well-known path used when the
+// resource identifier carries no path component (or is not a URL).
+const defaultResourceMetadataPath = "/.well-known/oauth-protected-resource"
+
+// metadataPaths lists the paths the metadata document is served at: the
+// path-appended location for this audience first, plus the bare well-known path
+// when it differs.
+func metadataPaths(audience string) []string {
+	p := resourceMetadataPath(audience)
+	if p == defaultResourceMetadataPath {
+		return []string{p}
+	}
+	return []string{p, defaultResourceMetadataPath}
+}
+
+// resourceMetadataPath derives the RFC 9728 §3.1 well-known path for a resource
+// identifier: the well-known segment is inserted between the host and the
+// resource's own path, so https://host/mcp is described at
+// /.well-known/oauth-protected-resource/mcp. An audience with no path — or one
+// that is an opaque identifier rather than a URL — uses the bare path.
+func resourceMetadataPath(audience string) string {
+	u, err := url.Parse(strings.TrimSpace(audience))
+	if err != nil || !u.IsAbs() {
+		return defaultResourceMetadataPath
+	}
+	p := strings.TrimSuffix(u.Path, "/")
+	if p == "" {
+		return defaultResourceMetadataPath
+	}
+	return defaultResourceMetadataPath + p
+}
+
+// resourceMetadataURL renders the absolute URL of this server's metadata
+// document, for the WWW-Authenticate header on a 401. It is derivable only from
+// an http(s) audience — the MCP-canonical form, where the resource identifier is
+// the server's own URL. An identifier-style audience (e.g. "api://gws-mcp") is
+// not fetchable, so it yields "" and the SDK omits the parameter rather than
+// advertising a location no client could resolve.
+func resourceMetadataURL(audience string) string {
+	u, err := url.Parse(strings.TrimSpace(audience))
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + resourceMetadataPath(audience)
 }
 
 // userKey is the TokenInfo.Extra key under which bearerVerifier stashes the
@@ -201,8 +275,18 @@ var resourceScopes = []string{"access_as_user"}
 // identifier (the audience tokens must be minted for) and the authorization
 // servers (issuers) whose tokens it accepts. It carries no secret and needs no
 // authentication.
+// The document is public by definition, so it answers cross-origin reads: a
+// browser-based MCP client must be able to fetch it from its own origin to run
+// discovery.
 func resourceMetadataHandler(cfg config.Config) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"resource":                 cfg.Audience,
