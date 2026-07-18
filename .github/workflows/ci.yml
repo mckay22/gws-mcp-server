@@ -20,4 +20,8 @@ jobs:
             echo "gofmt needed on:"; echo "$unformatted"; exit 1
           fi
       - run: go vet ./...
-      - run: go test ./...
+      # -race here rather than a plain run: the server serves many callers from
+      # one process (the DWD backend caches a token source per user behind a
+      # mutex), so a data race is a real failure mode and CI is where it should
+      # surface.
+      - run: go test -race ./...

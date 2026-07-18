@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -123,5 +125,55 @@ func TestHealthNeverLeaksSecrets(t *testing.T) {
 	// The human-readable line still reports presence.
 	if !strings.Contains(string(raw), "clientSecret=true") {
 		t.Errorf("health text should report clientSecret presence, got: %s", raw)
+	}
+}
+
+// TestRequireDistinctServiceAccounts covers the case the path check cannot see:
+// a COPY of the resource-server key at the application tier's path is a distinct
+// file carrying the same credential, so the tier separation — a leaked
+// resource-server key cannot reach application-tier scopes — would be defeated
+// by `cp`. Only the account identity inside the key reveals it.
+func TestRequireDistinctServiceAccounts(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, email, keyID string) string {
+		p := filepath.Join(dir, name)
+		body := `{"type":"service_account","client_email":"` + email + `","private_key_id":"` + keyID + `"}`
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	dwd := write("dwd-sa.json", "dwd@proj.iam.gserviceaccount.com", "key-1")
+	copied := write("app-sa-copy.json", "dwd@proj.iam.gserviceaccount.com", "key-1") // same account
+	sameKeyID := write("app-sa-samekey.json", "other@proj.iam.gserviceaccount.com", "key-1")
+	distinct := write("app-sa.json", "app@proj.iam.gserviceaccount.com", "key-2")
+
+	cases := []struct {
+		name    string
+		app     string
+		wantErr string
+	}{
+		{name: "copy of the DWD key", app: copied, wantErr: "same service account"},
+		{name: "same private key id", app: sameKeyID, wantErr: "same key"},
+		{name: "genuinely separate accounts", app: distinct},
+		{name: "unreadable app key defers to the loader", app: filepath.Join(dir, "missing.json")},
+	}
+	for _, tc := range cases {
+		err := requireDistinctServiceAccounts(config.Config{AppKeyPath: tc.app, DWDKeyPath: dwd})
+		if tc.wantErr == "" {
+			if err != nil {
+				t.Errorf("%s: unexpected err %v", tc.name, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+			t.Errorf("%s: err = %v, want it to mention %q", tc.name, err, tc.wantErr)
+		}
+	}
+
+	// With no resource-server key configured there is nothing to collide with.
+	if err := requireDistinctServiceAccounts(config.Config{AppKeyPath: copied}); err != nil {
+		t.Errorf("app-only without a DWD key should pass: %v", err)
 	}
 }

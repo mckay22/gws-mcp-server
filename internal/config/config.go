@@ -307,10 +307,35 @@ func (c Config) RequireAppOnly() error {
 	if strings.TrimSpace(c.AppKeyPath) == "" {
 		return fmt.Errorf("app-only mode requires %s", EnvAppKeyPath)
 	}
-	if d := strings.TrimSpace(c.DWDKeyPath); d != "" && d == strings.TrimSpace(c.AppKeyPath) {
+	app := strings.TrimSpace(c.AppKeyPath)
+	dwd := strings.TrimSpace(c.DWDKeyPath)
+	if dwd == "" {
+		return nil
+	}
+	if dwd == app || sameFile(dwd, app) {
+		// sameFile catches the aliases a string compare misses: a symlink, a
+		// relative vs absolute spelling, a hard link, or a bind mount. A *copy* of
+		// the same key has a different inode and is caught later, by the key
+		// identity check where the two credentials are actually loaded.
 		return fmt.Errorf("%s must be a SEPARATE key from %s — the application tier never shares the resource-server credential", EnvAppKeyPath, EnvDWDKeyPath)
 	}
 	return nil
+}
+
+// sameFile reports whether two paths resolve to the same file on disk, so a
+// symlink or an alternate spelling cannot pass off one credential as two. A path
+// that cannot be stat'ed is not treated as a match — the subsequent load reports
+// the real error.
+func sameFile(a, b string) bool {
+	fa, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	fb, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(fa, fb)
 }
 
 // SubjectClaimOrDefault returns the configured token claim to map to a Google

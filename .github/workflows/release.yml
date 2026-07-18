@@ -16,6 +16,17 @@ jobs:
         with:
           go-version: "1.25"
 
+      # A tag must not publish binaries that were never tested: releases are the
+      # one artifact users take on trust, and a tag can be cut from any commit.
+      - name: Test before releasing
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:"; echo "$unformatted"; exit 1
+          fi
+          go vet ./...
+          go test -race ./...
+
       - name: Build release binaries
         run: |
           mkdir -p dist

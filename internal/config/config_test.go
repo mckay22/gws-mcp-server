@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -137,5 +139,43 @@ func TestRedact(t *testing.T) {
 	}
 	if strings.Contains(got, "super-secret") {
 		t.Error("Redact leaked the value")
+	}
+}
+
+// TestRequireAppOnlyCatchesAliasedKey covers the tier-separation invariant: the
+// application tier must not be handed the resource-server's credential. A plain
+// string compare misses a symlink or an alternate spelling of the same file.
+func TestRequireAppOnlyCatchesAliasedKey(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "dwd-sa.json")
+	if err := os.WriteFile(real, []byte(`{"client_email":"a@b.iam.gserviceaccount.com"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "app-sa.json")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	cases := []struct {
+		name            string
+		app, dwd        string
+		wantSeparateErr bool
+	}{
+		{name: "same path", app: real, dwd: real, wantSeparateErr: true},
+		{name: "symlink to the same file", app: link, dwd: real, wantSeparateErr: true},
+		{name: "distinct files", app: filepath.Join(dir, "other.json"), dwd: real},
+	}
+	for _, tc := range cases {
+		cfg := Config{AppKeyPath: tc.app, DWDKeyPath: tc.dwd}
+		err := cfg.RequireAppOnly()
+		if tc.wantSeparateErr {
+			if err == nil || !strings.Contains(err.Error(), "SEPARATE") {
+				t.Errorf("%s: err = %v, want a separate-key rejection", tc.name, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: unexpected err %v", tc.name, err)
+		}
 	}
 }

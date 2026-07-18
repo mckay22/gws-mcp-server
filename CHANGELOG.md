@@ -88,6 +88,23 @@ API call shapes) on top of the first pass below.
   an admin row had no target — the audit tool could report what kind of thing
   happened but never what it happened to. Parameters are now requested and
   flattened from Google's four typed value fields into plain name/value pairs.
+- **(Medium) Tier separation survives an aliased or copied key.** The rule that
+  the application tier must hold its own service account was enforced by
+  comparing the two key *paths* as strings, which a symlink, a relative spelling,
+  or a copy defeated — so the "a leaked resource-server key cannot reach
+  application-tier scopes" property could be lost silently. `RequireAppOnly` now
+  compares file identity (`os.SameFile`), and startup additionally compares the
+  `client_email` / `private_key_id` inside the two keys, which is the only thing
+  that catches a copy. Neither check reads or reports private key material.
+- **(Medium) The OIDC verifier is now tested against forged signatures.** Every
+  existing rejection case (audience, issuer, expiry, malformed) fed a token
+  signed by the *trusted* key, so the whole suite would have passed had `Verify`
+  regressed to parsing claims without checking the signature. Two cases close
+  that: a token signed by an unpublished key (including one claiming the
+  issuer's `kid`) and a token whose payload was edited after signing.
+- **(Low) CI runs `-race`, and a release tag runs the tests before publishing.**
+  The race detector previously ran only on developer machines, and `release.yml`
+  cross-compiled and published binaries from a tag without testing it first.
 - **(Low) Docs: the Docker quickstart now binds `0.0.0.0`.** The example passed
   `--http :8080`, which binds loopback *inside* the container, so the published
   `-p 8080:8080` port forwarded to nothing.

@@ -2,6 +2,7 @@ package googleauth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -95,6 +96,30 @@ func NewDWD(keyPath string, scopes []string) (*DWD, error) {
 		},
 		sources: make(map[string]oauth2.TokenSource),
 	}, nil
+}
+
+// KeyIdentity returns a stable, non-secret identifier for a service-account key
+// file: its client_email and private_key_id. Neither is a secret — the private
+// key material is never read out — so the result is safe to compare and to name
+// in an error.
+//
+// It exists so the tiers can prove they hold *different* service accounts: the
+// path check in config catches aliases of one file, but a copied key is a
+// distinct file carrying the same credential, and only its identity reveals that.
+func KeyIdentity(keyPath string) (clientEmail, privateKeyID string, err error) {
+	keyJSON, err := os.ReadFile(keyPath)
+	if err != nil {
+		return "", "", fmt.Errorf("reading service-account key: %w", err)
+	}
+	var key struct {
+		ClientEmail  string `json:"client_email"`
+		PrivateKeyID string `json:"private_key_id"`
+	}
+	if err := json.Unmarshal(keyJSON, &key); err != nil {
+		// The message deliberately omits the content, which holds the private key.
+		return "", "", errors.New("parsing service-account key: not valid JSON")
+	}
+	return key.ClientEmail, key.PrivateKeyID, nil
 }
 
 // GoogleToken returns a bearer token for calling the Google APIs as the user on

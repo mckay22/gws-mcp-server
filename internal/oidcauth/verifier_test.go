@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -259,5 +260,95 @@ func TestVerifierRejectsMalformedToken(t *testing.T) {
 	// Sanity: issuerOf on a non-3-part token errors without panicking.
 	if _, err := issuerOf("abc"); err == nil || !strings.Contains(err.Error(), "malformed") {
 		t.Errorf("issuerOf malformed = %v", err)
+	}
+}
+
+// TestVerifierRejectsForeignSignature is the test the suite was missing. Every
+// other rejection case feeds a token signed by the TRUSTED key and varies a
+// claim, so all of them would still pass if Verify stopped checking signatures
+// and just parsed the payload. This one signs with a key the issuer's JWKS does
+// not publish: only real signature verification rejects it.
+//
+// It is the difference between "the verifier reads claims correctly" and "the
+// verifier cannot be handed a token an attacker minted".
+func TestVerifierRejectsForeignSignature(t *testing.T) {
+	fi := newFakeIssuer(t)
+	v, err := NewVerifier(context.Background(), []string{fi.url}, testAudience, "email", true)
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	// An attacker's key, never published in the issuer's JWKS.
+	attacker, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate attacker key: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		kid  string
+	}{
+		// Claiming the issuer's kid is the interesting case: the verifier finds a
+		// key by that id and must still reject the mismatched signature.
+		{name: "attacker key claiming the issuer's kid", kid: fi.kid},
+		{name: "attacker key with an unknown kid", kid: "attacker-key"},
+	} {
+		signer, err := jose.NewSigner(
+			jose.SigningKey{Algorithm: jose.RS256, Key: attacker},
+			(&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", tc.kid),
+		)
+		if err != nil {
+			t.Fatalf("%s: new signer: %v", tc.name, err)
+		}
+		// Claims are otherwise perfect: right issuer, audience, subject, expiry.
+		payload, err := json.Marshal(fi.standardClaims(testAudience))
+		if err != nil {
+			t.Fatalf("%s: marshal: %v", tc.name, err)
+		}
+		jws, err := signer.Sign(payload)
+		if err != nil {
+			t.Fatalf("%s: sign: %v", tc.name, err)
+		}
+		tok, err := jws.CompactSerialize()
+		if err != nil {
+			t.Fatalf("%s: serialize: %v", tc.name, err)
+		}
+
+		if _, err := v.Verify(context.Background(), tok); err == nil {
+			t.Errorf("%s: token with a forged signature was ACCEPTED", tc.name)
+		}
+	}
+}
+
+// A token whose payload has been edited after signing must be rejected: the
+// signature no longer covers the claims.
+func TestVerifierRejectsTamperedPayload(t *testing.T) {
+	fi := newFakeIssuer(t)
+	v, err := NewVerifier(context.Background(), []string{fi.url}, testAudience, "email", true)
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	tok := fi.sign(t, fi.standardClaims(testAudience))
+	if _, err := v.Verify(context.Background(), tok); err != nil {
+		t.Fatalf("baseline token should verify: %v", err)
+	}
+
+	// Swap the payload for one naming a different user, keeping the signature.
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 {
+		t.Fatalf("unexpected token shape")
+	}
+	claims := fi.standardClaims(testAudience)
+	claims["email"] = "admin@example.com"
+	claims["sub"] = "someone-else"
+	edited, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged := parts[0] + "." + base64.RawURLEncoding.EncodeToString(edited) + "." + parts[2]
+
+	if _, err := v.Verify(context.Background(), forged); err == nil {
+		t.Error("token with an edited payload was ACCEPTED — claims are not signature-protected")
 	}
 }

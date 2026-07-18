@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 
 	"github.com/mckay22/gws-mcp-server/internal/config"
 	"github.com/mckay22/gws-mcp-server/internal/gapi"
@@ -135,11 +136,51 @@ func buildAppClient(cfg config.Config) (*gapi.Client, error) {
 	if err := cfg.RequireAppOnly(); err != nil {
 		return nil, fmt.Errorf("app-only tier requested but misconfigured: %w", err)
 	}
+	if err := requireDistinctServiceAccounts(cfg); err != nil {
+		return nil, fmt.Errorf("app-only tier requested but misconfigured: %w", err)
+	}
 	appDWD, err := googleauth.NewDWD(cfg.AppKeyPath, appScopes(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("app-only tier requested but misconfigured: %w", err)
 	}
 	return gapi.New(appDWD), nil
+}
+
+// requireDistinctServiceAccounts proves the application tier and the
+// resource-server backend hold genuinely different service accounts.
+//
+// config.RequireAppOnly already rejects the same file named twice, including via
+// a symlink. This closes the remaining case: a *copy* of one key at a second
+// path is a distinct file carrying the same credential, so only the account
+// identity inside the key reveals it. Without this the tier separation — a
+// leaked resource-server key cannot reach application-tier scopes — is
+// defeated by `cp`.
+//
+// A key that cannot be read or parsed is left to the loaders to report; this
+// check only fails on a positive match, and names no secret.
+func requireDistinctServiceAccounts(cfg config.Config) error {
+	if strings.TrimSpace(cfg.DWDKeyPath) == "" {
+		return nil // no resource-server credential to collide with
+	}
+	appEmail, appKeyID, err := googleauth.KeyIdentity(cfg.AppKeyPath)
+	if err != nil {
+		return nil
+	}
+	dwdEmail, dwdKeyID, err := googleauth.KeyIdentity(cfg.DWDKeyPath)
+	if err != nil {
+		return nil
+	}
+	if appEmail != "" && appEmail == dwdEmail {
+		return fmt.Errorf(
+			"%s and %s hold the same service account (%s) — the application tier must have its own, "+
+				"so a leaked resource-server credential cannot reach application-tier scopes",
+			config.EnvAppKeyPath, config.EnvDWDKeyPath, appEmail)
+	}
+	if appKeyID != "" && appKeyID == dwdKeyID {
+		return fmt.Errorf("%s and %s are the same key — the application tier must have its own",
+			config.EnvAppKeyPath, config.EnvDWDKeyPath)
+	}
+	return nil
 }
 
 // registerTools installs every Google-backed tool on the server: the read tools
