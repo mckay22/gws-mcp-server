@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/url"
 	"strconv"
 	"strings"
@@ -25,7 +26,7 @@ func registerGmailReadTools(server *mcp.Server, gc *gapi.Client) {
 	registerGetMessage(server, gc)
 }
 
-// maxBodyBytes caps the decoded plain-text body get_message returns, so a large
+// maxBodyBytes caps the decoded body get_message returns, so a large
 // message can't flood model context. Anything longer is truncated with a flag.
 const maxBodyBytes = 100 << 10 // 100 KiB
 
@@ -229,7 +230,7 @@ func listMessages(ctx context.Context, gc *gapi.Client, user, query string, labe
 
 type getMessageInput struct {
 	ID     string `json:"id" jsonschema:"the message id from list_messages/search_messages"`
-	Format string `json:"format,omitempty" jsonschema:"'metadata' for headers + snippet (default) or 'full' to also include the decoded plain-text body"`
+	Format string `json:"format,omitempty" jsonschema:"'metadata' for headers + snippet (default) or 'full' to also include the decoded message body"`
 }
 
 // MessageDetail is the summarized single message get_message returns. Common
@@ -248,6 +249,10 @@ type MessageDetail struct {
 	SizeEstimate  int      `json:"sizeEstimate,omitempty"`
 	Body          string   `json:"body,omitempty"`
 	BodyTruncated bool     `json:"bodyTruncated,omitempty"`
+	// BodyFromHTML reports that the message carried no plain-text part and the
+	// body was reduced from its HTML, so a reader knows the text is derived
+	// rather than authored.
+	BodyFromHTML bool `json:"bodyFromHtml,omitempty"`
 }
 
 // gmailPart mirrors the recursive MIME payload tree Gmail returns.
@@ -273,7 +278,7 @@ func registerGetMessage(server *mcp.Server, gc *gapi.Client) {
 		Name:        "get_message",
 		Annotations: readAnnotations(),
 		Title:       "Get Gmail message",
-		Description: "Fetch a single message by id. Default 'metadata' format returns the common headers (From/To/Cc/Subject/Date) plus the snippet; 'full' also returns the decoded plain-text body (capped at 100 KiB). Use ids from list_messages/search_messages.",
+		Description: "Fetch a single message by id. Default 'metadata' format returns the common headers (From/To/Cc/Subject/Date) plus the snippet; 'full' also returns the decoded body (capped at 100 KiB): the plain-text part, or the HTML part reduced to text when the message has no plain-text alternative (bodyFromHtml is set in that case). Use ids from list_messages/search_messages.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in getMessageInput) (*mcp.CallToolResult, MessageDetail, error) {
 		detail, err := fetchMessageDetail(ctx, gc, "me", in.ID, in.Format)
 		if err != nil {
@@ -343,9 +348,10 @@ func fetchMessageDetail(ctx context.Context, gc *gapi.Client, user, id, format s
 		Date:         headerValue(msg.Payload.Headers, "Date"),
 	}
 	if format == "full" {
-		body, truncated := plainTextBody(msg.Payload)
+		body, truncated, fromHTML := messageBody(msg.Payload)
 		detail.Body = body
 		detail.BodyTruncated = truncated
+		detail.BodyFromHTML = fromHTML
 	}
 	return detail, nil
 }
@@ -361,34 +367,116 @@ func headerValue(headers []gmailHeader, name string) string {
 	return ""
 }
 
-// plainTextBody walks the MIME tree for the first text/plain part, decodes its
-// base64url body, and returns it capped at maxBodyBytes. The bool reports
-// whether the body was truncated.
-func plainTextBody(part gmailPart) (string, bool) {
-	data := firstTextPlain(part)
+// messageBody extracts a readable body from a message's MIME tree, capped at
+// maxBodyBytes. It returns the text, whether it was truncated, and whether it
+// came from an HTML part rather than a plain-text one.
+//
+// text/plain is preferred. Falling back to text/html matters because a great deal
+// of real mail — most commercial and newsletter mail — ships HTML only; taking
+// plain text alone reported those as having no body at all, which reads to a
+// model as "this email is empty" rather than "this reader can't see it".
+func messageBody(part gmailPart) (body string, truncated, fromHTML bool) {
+	data := firstPartOfType(part, "text/plain")
 	if data == "" {
-		return "", false
+		if data = firstPartOfType(part, "text/html"); data == "" {
+			return "", false, false
+		}
+		fromHTML = true
 	}
 	decoded, err := decodeSegment(data)
 	if err != nil {
-		return "", false
+		return "", false, false
+	}
+	if fromHTML {
+		decoded = []byte(htmlToText(string(decoded)))
 	}
 	capped, truncated := truncateUTF8(decoded, maxBodyBytes)
-	return string(capped), truncated
+	return string(capped), truncated, fromHTML
 }
 
-// firstTextPlain returns the raw base64url body data of the first text/plain
-// part found in a depth-first walk, or "" when there is none.
-func firstTextPlain(part gmailPart) string {
-	if strings.EqualFold(part.MimeType, "text/plain") && part.Body.Data != "" {
+// firstPartOfType returns the raw base64url body data of the first part with the
+// given MIME type in a depth-first walk, or "" when there is none.
+func firstPartOfType(part gmailPart, mimeType string) string {
+	if strings.EqualFold(part.MimeType, mimeType) && part.Body.Data != "" {
 		return part.Body.Data
 	}
 	for _, p := range part.Parts {
-		if data := firstTextPlain(p); data != "" {
+		if data := firstPartOfType(p, mimeType); data != "" {
 			return data
 		}
 	}
 	return ""
+}
+
+// htmlToText reduces an HTML body to readable text: script and style contents are
+// dropped, block-level boundaries become newlines, tags are stripped, and entities
+// are unescaped. It is a reader, not a sanitizer — the output is text for a model
+// to read, never markup to render — so it aims at legibility rather than at a
+// complete HTML parse.
+func htmlToText(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+
+	for i := 0; i < len(s); {
+		c := s[i]
+		if c != '<' {
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		// Skip a comment or doctype wholesale.
+		if strings.HasPrefix(s[i:], "<!") {
+			if end := strings.IndexByte(s[i:], '>'); end >= 0 {
+				i += end + 1
+				continue
+			}
+			break
+		}
+		end := strings.IndexByte(s[i:], '>')
+		if end < 0 {
+			break // an unterminated tag: drop the remainder
+		}
+		tag := s[i+1 : i+end]
+		i += end + 1
+
+		name := strings.ToLower(strings.TrimLeft(tag, "/"))
+		if cut := strings.IndexAny(name, " \t\r\n/"); cut >= 0 {
+			name = name[:cut]
+		}
+		switch name {
+		case "script", "style", "head":
+			// Drop the element's contents too — it is code, not prose.
+			if closing := strings.Index(strings.ToLower(s[i:]), "</"+name); closing >= 0 {
+				i += closing
+			}
+		case "br", "p", "div", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6",
+			"table", "ul", "ol", "blockquote", "section", "article", "header", "footer":
+			b.WriteByte('\n')
+		}
+	}
+	return strings.TrimSpace(collapseBlankLines(html.UnescapeString(b.String())))
+}
+
+// collapseBlankLines squeezes runs of blank lines (which tag-stripping produces
+// freely) down to one, and trims trailing spaces, so the result reads as prose
+// instead of as a column of whitespace.
+func collapseBlankLines(s string) string {
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	out := make([]string, 0, len(lines))
+	blank := 0
+	for _, ln := range lines {
+		ln = strings.TrimRight(ln, " \t")
+		if strings.TrimSpace(ln) == "" {
+			if blank++; blank > 1 {
+				continue
+			}
+			out = append(out, "")
+			continue
+		}
+		blank = 0
+		out = append(out, ln)
+	}
+	return strings.Join(out, "\n")
 }
 
 // decodeSegment decodes Gmail's web-safe (URL-safe) base64 body data, tolerating

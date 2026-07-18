@@ -88,6 +88,14 @@ API call shapes) on top of the first pass below.
   an admin row had no target — the audit tool could report what kind of thing
   happened but never what it happened to. Parameters are now requested and
   flattened from Google's four typed value fields into plain name/value pairs.
+- **(Medium) `get_message` no longer reports HTML-only mail as empty.** Body
+  extraction took the first `text/plain` part and stopped, so a message shipping
+  HTML only — most commercial and newsletter mail — came back with `body: ""` and
+  no explanation, which reads as "this email is empty" rather than "this reader
+  cannot see it". It now falls back to the `text/html` part reduced to readable
+  text (script/style dropped, block tags become line breaks, entities unescaped)
+  and sets `bodyFromHtml` so a caller knows the text is derived. Plain text is
+  still preferred when both parts exist.
 - **(Medium) Tier separation survives an aliased or copied key.** The rule that
   the application tier must hold its own service account was enforced by
   comparing the two key *paths* as strings, which a symlink, a relative spelling,

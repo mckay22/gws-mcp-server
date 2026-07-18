@@ -50,7 +50,7 @@ Scope: `https://www.googleapis.com/auth/gmail.readonly`.
 | `list_labels` | 🟢 | System and user labels with their ids (for use as `labelIds` filters). |
 | `list_messages` | 🟢 | List messages (optionally filtered by a Gmail query and/or label ids). Returns message + thread ids; page with `nextPageToken`. |
 | `search_messages` | 🟢 | Same as `list_messages` but with a required Gmail query (`from:`, `is:unread`, `has:attachment`, `newer_than:`, …). |
-| `get_message` | 🟢 | One message by id. `metadata` (default): common headers + snippet. `full`: adds the decoded plain-text body (capped at 100 KiB). |
+| `get_message` | 🟢 | One message by id. `metadata` (default): common headers + snippet. `full`: adds the decoded body (capped at 100 KiB) — the plain-text part, or the HTML reduced to text when the message carries HTML only, flagged with `bodyFromHtml`. |
 
 ### Projection and paging
 

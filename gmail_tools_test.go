@@ -318,3 +318,64 @@ func TestGetMessageRequiresID(t *testing.T) {
 		t.Errorf("error = %q, want 'id is required'", msg)
 	}
 }
+
+// TestMessageBodyFallsBackToHTML covers the mail that has no plain-text part at
+// all — most commercial and newsletter mail. Taking text/plain alone reported
+// those as having an empty body, which reads to a model as "this email is
+// empty" rather than "this reader cannot see it".
+func TestMessageBodyFallsBackToHTML(t *testing.T) {
+	enc := func(s string) string { return base64.URLEncoding.EncodeToString([]byte(s)) }
+
+	t.Run("prefers plain text when both parts exist", func(t *testing.T) {
+		part := gmailPart{
+			MimeType: "multipart/alternative",
+			Parts: []gmailPart{
+				{MimeType: "text/plain", Body: gmailBody{Data: enc("the plain version")}},
+				{MimeType: "text/html", Body: gmailBody{Data: enc("<p>the html version</p>")}},
+			},
+		}
+		body, _, fromHTML := messageBody(part)
+		if body != "the plain version" || fromHTML {
+			t.Errorf("body = %q, fromHTML = %v; want the plain part", body, fromHTML)
+		}
+	})
+
+	t.Run("falls back to HTML and flags it", func(t *testing.T) {
+		htmlDoc := `<html><head><style>p{color:red}</style></head>` +
+			`<body><p>Hello&nbsp;Ada</p><p>Your invoice for &pound;10 is <b>ready</b>.</p>` +
+			`<script>track()</script></body></html>`
+		part := gmailPart{MimeType: "text/html", Body: gmailBody{Data: enc(htmlDoc)}}
+
+		body, _, fromHTML := messageBody(part)
+		if !fromHTML {
+			t.Error("bodyFromHtml should be set when the text came from an HTML part")
+		}
+		for _, want := range []string{"Hello Ada", "Your invoice for £10 is ready."} {
+			if !strings.Contains(body, want) {
+				t.Errorf("body %q missing %q", body, want)
+			}
+		}
+		for _, unwanted := range []string{"<p>", "<b>", "color:red", "track()", "&nbsp;", "&pound;"} {
+			if strings.Contains(body, unwanted) {
+				t.Errorf("body %q still contains %q", body, unwanted)
+			}
+		}
+	})
+
+	t.Run("no readable part yields no body", func(t *testing.T) {
+		part := gmailPart{MimeType: "application/pdf", Body: gmailBody{Data: enc("%PDF-1.4")}}
+		if body, _, fromHTML := messageBody(part); body != "" || fromHTML {
+			t.Errorf("body = %q, fromHTML = %v; want empty", body, fromHTML)
+		}
+	})
+}
+
+func TestHTMLToTextCollapsesBlankLines(t *testing.T) {
+	got := htmlToText("<div>one</div><div></div><div></div><div>two</div>")
+	if strings.Contains(got, "\n\n\n") {
+		t.Errorf("runs of blank lines were not collapsed: %q", got)
+	}
+	if !strings.Contains(got, "one") || !strings.Contains(got, "two") {
+		t.Errorf("content lost: %q", got)
+	}
+}
