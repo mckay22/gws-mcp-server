@@ -71,6 +71,7 @@ type directoryUsersSearchOutput struct {
 func registerDirectoryUsersSearch(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "directory_users_search",
+		Annotations: readAnnotations(),
 		Title:       "Search directory users",
 		Description: "Search or list users in the Workspace/Cloud Identity directory (Admin SDK). Requires the signed-in user to be an admin. Returns compact summaries; page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in directoryUsersSearchInput) (*mcp.CallToolResult, directoryUsersSearchOutput, error) {
@@ -136,6 +137,7 @@ type DirectoryUserDetail struct {
 func registerDirectoryUserGet(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "directory_user_get",
+		Annotations: readAnnotations(),
 		Title:       "Get directory user",
 		Description: "Fetch a single directory user by primary email or id (Admin SDK), including aliases, org unit, admin flags, and 2SV enrollment. Requires an admin caller.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in directoryUserGetInput) (*mcp.CallToolResult, DirectoryUserDetail, error) {
@@ -183,6 +185,7 @@ type directoryGroupsSearchOutput struct {
 func registerDirectoryGroupsSearch(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "directory_groups_search",
+		Annotations: readAnnotations(),
 		Title:       "Search directory groups",
 		Description: "Search or list groups in the directory (Admin SDK), optionally limited to those a given user belongs to. Requires an admin caller. Page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in directoryGroupsSearchInput) (*mcp.CallToolResult, directoryGroupsSearchOutput, error) {
@@ -244,6 +247,7 @@ type directoryGroupMembersOutput struct {
 func registerDirectoryGroupMembers(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "directory_group_members",
+		Annotations: readAnnotations(),
 		Title:       "List group members",
 		Description: "List the members of a directory group by group email or id (Admin SDK), with each member's role (OWNER/MANAGER/MEMBER) and type. Requires an admin caller. Page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in directoryGroupMembersInput) (*mcp.CallToolResult, directoryGroupMembersOutput, error) {
@@ -298,6 +302,7 @@ type directoryRolesListOutput struct {
 func registerDirectoryRolesList(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "directory_roles_list",
+		Annotations: readAnnotations(),
 		Title:       "List admin roles",
 		Description: "List the admin roles defined for the account (Admin SDK role management) — system roles and custom roles, flagging super-admin. Requires an admin caller with the role-management privilege.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in directoryRolesListInput) (*mcp.CallToolResult, directoryRolesListOutput, error) {
@@ -350,6 +355,7 @@ type directoryRoleAssignmentsOutput struct {
 func registerDirectoryRoleAssignments(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "directory_role_assignments",
+		Annotations: readAnnotations(),
 		Title:       "List admin role assignments",
 		Description: "List admin-role assignments (Admin SDK), optionally filtered to a user or a role id — who holds which admin role. assignedTo is a user id (resolve via directory_user_get). Requires an admin caller.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in directoryRoleAssignmentsInput) (*mcp.CallToolResult, directoryRoleAssignmentsOutput, error) {

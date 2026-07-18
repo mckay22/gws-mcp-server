@@ -102,6 +102,7 @@ type listCalendarsOutput struct {
 func registerListCalendars(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_calendars",
+		Annotations: readAnnotations(),
 		Title:       "List calendars",
 		Description: "List the calendars on the signed-in user's calendar list, with their ids (use as calendarId in list_events/get_event), access role, and time zone.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ listCalendarsInput) (*mcp.CallToolResult, listCalendarsOutput, error) {
@@ -145,6 +146,7 @@ type listEventsOutput struct {
 func registerListEvents(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_events",
+		Annotations: readAnnotations(),
 		Title:       "List calendar events",
 		Description: "List events in a calendar within a time window, expanded to single instances and ordered by start time. Defaults to the primary calendar and the next 30 days. Returns one page; page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listEventsInput) (*mcp.CallToolResult, listEventsOutput, error) {
@@ -221,6 +223,7 @@ type getEventInput struct {
 func registerGetEvent(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_event",
+		Annotations: readAnnotations(),
 		Title:       "Get calendar event",
 		Description: "Fetch a single event by id (including its description and attendee RSVP states) from the given calendar (default 'primary').",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in getEventInput) (*mcp.CallToolResult, Event, error) {
@@ -274,6 +277,7 @@ type freeBusyOutput struct {
 func registerFreeBusy(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "freebusy_query",
+		Annotations: readAnnotations(),
 		Title:       "Query free/busy",
 		Description: "Return busy time intervals for one or more calendars in a window (default the primary calendar, next 7 days) — the free/busy availability view, without event details.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in freeBusyInput) (*mcp.CallToolResult, freeBusyOutput, error) {

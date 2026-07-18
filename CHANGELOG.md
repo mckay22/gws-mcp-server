@@ -35,6 +35,20 @@ API call shapes) on top of the first pass below.
   preflight and sends `Access-Control-Allow-Origin`, which browser-based clients
   need to run discovery. An identifier-style audience (`api://…`) advertises no
   metadata URL rather than an unfetchable one.
+- **(High, spec compliance) Every tool now declares MCP tool annotations.** All
+  60 tools shipped with none, and the spec's default for an unannotated tool is
+  read-write, destructive, non-idempotent, and open-world — so a client (or a
+  policy layer in front of one) had to treat `list_messages` exactly like
+  `directory_user_suspend`. Each tool now declares `readOnlyHint`,
+  `destructiveHint`, `idempotentHint`, and `openWorldHint` from a small shared
+  vocabulary (`readAnnotations` / `additiveAnnotations` /
+  `destructiveAnnotations` / `localAnnotations` in `tools.go`): 35 read-only, 25
+  mutating, `health` the only closed-world tool. `destructiveHint` follows the
+  spec's delete-or-overwrite definition, so an irreversible-but-additive action
+  like `gmail_send` is `false` — irreversibility stays the send gate's job, which
+  `docs/capabilities.md` now spells out for policy-layer consumers. Contract
+  tests assert every tool is annotated, that no read-only tool claims
+  destructiveness, and pin the classification of the 23 mutations by name.
 - **(Medium) Cross-origin protection on the MCP endpoint.** The streamable HTTP
   handler is wrapped in `net/http`'s `CrossOriginProtection` (the SDK applies
   none by default in v1.6.x), rejecting cross-origin browser requests as

@@ -41,6 +41,7 @@ type listTasklistsOutput struct {
 func registerListTasklists(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "tasks_list_tasklists",
+		Annotations: readAnnotations(),
 		Title:       "List task lists",
 		Description: "List the signed-in user's Google Tasks lists, with their ids (use as tasklist in the other task tools).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ listTasklistsInput) (*mcp.CallToolResult, listTasklistsOutput, error) {
@@ -86,6 +87,7 @@ type listTasksOutput struct {
 func registerListTasks(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "tasks_list",
+		Annotations: readAnnotations(),
 		Title:       "List tasks",
 		Description: "List tasks in a task list (default the user's default list). Excludes completed tasks unless requested. Page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listTasksInput) (*mcp.CallToolResult, listTasksOutput, error) {
@@ -128,6 +130,7 @@ type taskCreateInput struct {
 func registerTaskCreate(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "tasks_create",
+		Annotations: additiveAnnotations(),
 		Title:       "Create a task",
 		Description: "Create a task in a task list. Reversible, so it rides the write gate: without " + config.EnvAllowWrites + "=true it returns a dry-run preview.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in taskCreateInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -167,6 +170,7 @@ type taskCompleteInput struct {
 func registerTaskComplete(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "tasks_complete",
+		Annotations: destructiveAnnotations(),
 		Title:       "Complete a task",
 		Description: "Mark a task as completed. Reversible, so it rides the write gate: without " + config.EnvAllowWrites + "=true it returns a dry-run preview.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in taskCompleteInput) (*mcp.CallToolResult, writeOutput, error) {

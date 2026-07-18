@@ -98,6 +98,7 @@ type gmailCreateDraftInput struct {
 func registerGmailCreateDraft(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_create_draft",
+		Annotations: additiveAnnotations(),
 		Title:       "Create Gmail draft",
 		Description: "Create a draft email in the signed-in user's mailbox (POST /users/me/drafts). A draft is saved but NOT sent, so it rides the ordinary write gate — without " + config.EnvAllowWrites + "=true (or --allow-writes) it returns a dry-run preview instead of calling Google.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in gmailCreateDraftInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -133,6 +134,7 @@ type gmailModifyInput struct {
 func registerGmailModify(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_modify",
+		Annotations: destructiveAnnotations(),
 		Title:       "Modify Gmail message labels",
 		Description: "Add and/or remove labels on a message (POST /users/me/messages/{id}/modify) — the mechanism behind read/unread (UNREAD label), archive (remove INBOX), star, and custom labels. Reversible, so it rides the write gate: without " + config.EnvAllowWrites + "=true it returns a dry-run preview.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in gmailModifyInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -173,6 +175,7 @@ type gmailSendInput struct {
 func registerGmailSend(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_send",
+		Annotations: additiveAnnotations(),
 		Title:       "Send Gmail message",
 		Description: "Send an email as the signed-in user (POST /users/me/messages/send). Sending is irreversible, so it is gated by the SEPARATE send gate: without " + config.EnvAllowSends + "=true it returns a dry-run preview showing the full To/Cc/Subject/body (nothing redacted — the point is to SEE the mail before sending) instead of calling Google.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in gmailSendInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -210,6 +213,7 @@ type gmailReplyInput struct {
 func registerGmailReply(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_reply",
+		Annotations: additiveAnnotations(),
 		Title:       "Reply to Gmail thread",
 		Description: "Send a reply within an existing thread as the signed-in user (POST /users/me/messages/send with threadId). Sending is irreversible, so it is gated by the SEPARATE send gate: without " + config.EnvAllowSends + "=true it returns a dry-run preview instead of calling Google.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in gmailReplyInput) (*mcp.CallToolResult, writeOutput, error) {

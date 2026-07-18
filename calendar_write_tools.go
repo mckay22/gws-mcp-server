@@ -55,6 +55,7 @@ type createAppointmentInput struct {
 func registerCreateAppointment(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_appointment",
+		Annotations: additiveAnnotations(),
 		Title:       "Create appointment (no attendees)",
 		Description: "Create a personal calendar event with NO attendees — nobody is emailed, so this is a reversible write gated by " + config.EnvAllowWrites + " (or --allow-writes). To invite attendees use create_event_with_attendees, which is send-gated.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in createAppointmentInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -94,6 +95,7 @@ type createEventWithAttendeesInput struct {
 func registerCreateEventWithAttendees(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_event_with_attendees",
+		Annotations: additiveAnnotations(),
 		Title:       "Create event with attendees (sends invites)",
 		Description: "Create a calendar event WITH attendees and email them invitations (sendUpdates=all). Because it notifies people, it is gated by the SEPARATE send gate: without " + config.EnvAllowSends + "=true it returns a dry-run preview of the exact invite instead of sending.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in createEventWithAttendeesInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -138,6 +140,7 @@ type updateEventInput struct {
 func registerUpdateEvent(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "update_event",
+		Annotations: destructiveAnnotations(),
 		Title:       "Update event (notifies attendees)",
 		Description: "Patch fields of an existing event and notify its attendees of the change (PATCH, sendUpdates=all). Because it emails attendees it is send-gated: without " + config.EnvAllowSends + "=true it returns a dry-run preview of the patch.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in updateEventInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -187,6 +190,7 @@ type cancelEventInput struct {
 func registerCancelEvent(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "cancel_event",
+		Annotations: destructiveAnnotations(),
 		Title:       "Cancel event (notifies attendees)",
 		Description: "Delete/cancel an event and notify its attendees (DELETE, sendUpdates=all). Irreversible and attendee-notifying, so it is send-gated: without " + config.EnvAllowSends + "=true it returns a dry-run preview.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in cancelEventInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -217,6 +221,7 @@ type respondToEventInput struct {
 func registerRespondToEvent(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "respond_to_event",
+		Annotations: destructiveAnnotations(),
 		Title:       "RSVP to an event",
 		Description: "Set the signed-in user's RSVP (accepted/declined/tentative) on an event and notify the organizer (PATCH the matching attendee, sendUpdates=all). Because it emails the organizer it is send-gated: without " + config.EnvAllowSends + "=true it returns a dry-run preview.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in respondToEventInput) (*mcp.CallToolResult, writeOutput, error) {

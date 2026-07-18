@@ -49,6 +49,7 @@ type peopleSearchOutput struct {
 func registerPeopleSearch(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "people_search_contacts",
+		Annotations: readAnnotations(),
 		Title:       "Search contacts",
 		Description: "Search the signed-in user's personal contacts by name, email, or phone (People API). Returns compact contact cards.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in peopleSearchInput) (*mcp.CallToolResult, peopleSearchOutput, error) {
@@ -131,6 +132,7 @@ type chatListSpacesOutput struct {
 func registerChatListSpaces(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_list_spaces",
+		Annotations: readAnnotations(),
 		Title:       "List Chat spaces",
 		Description: "List the Google Chat spaces the signed-in user is a member of (Workspace-only). Returns space ids (names) for use with chat_list_messages/chat_send_message.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in chatListSpacesInput) (*mcp.CallToolResult, chatListSpacesOutput, error) {
@@ -181,6 +183,7 @@ type chatListMessagesOutput struct {
 func registerChatListMessages(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_list_messages",
+		Annotations: readAnnotations(),
 		Title:       "List Chat messages",
 		Description: "List messages in a Google Chat space (Workspace-only). Page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in chatListMessagesInput) (*mcp.CallToolResult, chatListMessagesOutput, error) {
@@ -220,6 +223,7 @@ type chatSendInput struct {
 func registerChatSendMessage(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_send_message",
+		Annotations: additiveAnnotations(),
 		Title:       "Send a Chat message",
 		Description: "Post a message to a Google Chat space as the signed-in user (Workspace-only). Sending is irreversible, so it is gated by the SEPARATE send gate: without " + config.EnvAllowSends + "=true it returns a dry-run preview of the exact message.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in chatSendInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -265,6 +269,7 @@ type meetRecordsOutput struct {
 func registerMeetConferenceRecords(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "meet_conference_records",
+		Annotations: readAnnotations(),
 		Title:       "List Meet conference records",
 		Description: "List Google Meet conference records the signed-in user has access to (Workspace, edition-gated — errors cleanly if unavailable). Each record's id leads to its recordings/transcripts. Page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in meetRecordsInput) (*mcp.CallToolResult, meetRecordsOutput, error) {
@@ -308,6 +313,7 @@ type sharedWithMeInput struct {
 func registerDriveSharedWithMe(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "drive_shared_with_me",
+		Annotations: readAnnotations(),
 		Title:       "List files shared with me",
 		Description: "List Drive files that others have shared with the signed-in user (most recently modified first). Returns file metadata; page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in sharedWithMeInput) (*mcp.CallToolResult, listFilesOutput, error) {

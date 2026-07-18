@@ -194,6 +194,7 @@ type healthOutput struct {
 func registerHealth(server *mcp.Server, cfg config.Config, transport string) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "health",
+		Annotations: localAnnotations(),
 		Title:       "Health check",
 		Description: "Report how the server is running: name, version, transport, operating mode, and which GWS_* configuration variables are set (booleans only — never any secret value). Makes no Google API calls.",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, _ healthInput) (*mcp.CallToolResult, healthOutput, error) {

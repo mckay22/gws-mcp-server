@@ -38,6 +38,7 @@ type directoryUserCreateInput struct {
 func registerDirectoryUserCreate(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "directory_user_create",
+		Annotations: additiveAnnotations(),
 		Title:       "Create a directory user",
 		Description: "Create a new user in the directory (Admin SDK). Reversible admin write, gated by " + config.EnvAllowWrites + " (or --allow-writes). The dry-run preview REDACTS the password. Requires an admin caller with user-management privilege.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in directoryUserCreateInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -87,6 +88,7 @@ type directoryUserUpdateInput struct {
 func registerDirectoryUserUpdate(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "directory_user_update",
+		Annotations: destructiveAnnotations(),
 		Title:       "Update a directory user",
 		Description: "Patch a user's profile fields (name, org unit) in the directory (Admin SDK PATCH). Reversible admin write gated by " + config.EnvAllowWrites + ". Requires an admin caller.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in directoryUserUpdateInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -132,6 +134,7 @@ type directoryUserSuspendInput struct {
 func registerDirectoryUserSuspend(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "directory_user_suspend",
+		Annotations: destructiveAnnotations(),
 		Title:       "Suspend or un-suspend a user",
 		Description: "Suspend (block sign-in) or un-suspend a directory user (Admin SDK PATCH suspended). Reversible admin write gated by " + config.EnvAllowWrites + ". Requires an admin caller.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in directoryUserSuspendInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -165,6 +168,7 @@ type directoryGroupCreateInput struct {
 func registerDirectoryGroupCreate(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "directory_group_create",
+		Annotations: additiveAnnotations(),
 		Title:       "Create a directory group",
 		Description: "Create a new group in the directory (Admin SDK). Reversible admin write gated by " + config.EnvAllowWrites + ". Requires an admin caller with group-management privilege.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in directoryGroupCreateInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -201,6 +205,7 @@ type directoryGroupAddMemberInput struct {
 func registerDirectoryGroupAddMember(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "directory_group_add_member",
+		Annotations: additiveAnnotations(),
 		Title:       "Add a group member",
 		Description: "Add a member to a directory group with a role (Admin SDK). Reversible admin write gated by " + config.EnvAllowWrites + ". Requires an admin caller.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in directoryGroupAddMemberInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -237,6 +242,7 @@ type directoryGroupRemoveMemberInput struct {
 func registerDirectoryGroupRemoveMember(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "directory_group_remove_member",
+		Annotations: destructiveAnnotations(),
 		Title:       "Remove a group member",
 		Description: "Remove a member from a directory group (Admin SDK DELETE). Reversible admin write gated by " + config.EnvAllowWrites + ". Requires an admin caller.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in directoryGroupRemoveMemberInput) (*mcp.CallToolResult, writeOutput, error) {

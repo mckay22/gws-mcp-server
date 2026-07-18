@@ -40,6 +40,7 @@ type VacationSettings struct {
 func registerGetVacation(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_get_vacation",
+		Annotations: readAnnotations(),
 		Title:       "Get vacation responder",
 		Description: "Get the signed-in user's Gmail vacation responder (out-of-office auto-reply) settings.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ getVacationInput) (*mcp.CallToolResult, VacationSettings, error) {
@@ -72,6 +73,7 @@ type setVacationInput struct {
 func registerSetVacation(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_set_vacation",
+		Annotations: destructiveAnnotations(),
 		Title:       "Set vacation responder",
 		Description: "Enable or disable the signed-in user's Gmail vacation responder (out-of-office). Reversible, so it rides the write gate: without " + config.EnvAllowWrites + "=true it returns a dry-run preview instead of applying.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in setVacationInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -125,6 +127,7 @@ type listFiltersOutput struct {
 func registerListFilters(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_list_filters",
+		Annotations: readAnnotations(),
 		Title:       "List Gmail filters",
 		Description: "List the signed-in user's Gmail filters (the inbox-rules analog): each filter's matching criteria and the action it applies.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ listFiltersInput) (*mcp.CallToolResult, listFiltersOutput, error) {
@@ -165,6 +168,7 @@ type listSendAsOutput struct {
 func registerListSendAs(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_list_send_as",
+		Annotations: readAnnotations(),
 		Title:       "List send-as addresses",
 		Description: "List the signed-in user's Gmail send-as addresses (the primary address and any configured aliases), with their display names and verification status.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ listSendAsInput) (*mcp.CallToolResult, listSendAsOutput, error) {

@@ -51,6 +51,7 @@ type uploadFileInput struct {
 func registerUploadFile(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "upload_file",
+		Annotations: additiveAnnotations(),
 		Title:       "Upload a Drive file",
 		Description: "Create a new file in Drive with the given text content (multipart upload). Reversible, so it rides the write gate: without " + config.EnvAllowWrites + "=true it returns a dry-run preview of the metadata and content instead of uploading.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in uploadFileInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -101,6 +102,7 @@ type shareFileInput struct {
 func registerShareFile(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "share_file",
+		Annotations: additiveAnnotations(),
 		Title:       "Share a Drive file (grant access)",
 		Description: "Grant a permission on a Drive file or folder (POST /files/{id}/permissions) — this exposes the file to another principal (egress). Because it grants access outside the current owner, it is gated by the SEPARATE send gate: without " + config.EnvAllowSends + "=true it returns a dry-run preview of the exact grant instead of applying it.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in shareFileInput) (*mcp.CallToolResult, writeOutput, error) {

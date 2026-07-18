@@ -65,6 +65,7 @@ type appListMessagesInput struct {
 func registerAppListMessages(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "app_list_messages",
+		Annotations: readAnnotations(),
 		Title:       "App: list a user's messages",
 		Description: "List messages in an explicit user's mailbox via the application service account (domain-wide delegation). Requires the SA's DWD grant to cover Gmail read for that user. Returns message + thread ids; page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in appListMessagesInput) (*mcp.CallToolResult, messageListOutput, error) {
@@ -90,6 +91,7 @@ type appGetMessageInput struct {
 func registerAppGetMessage(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "app_get_message",
+		Annotations: readAnnotations(),
 		Title:       "App: get a user's message",
 		Description: "Fetch a single message from an explicit user's mailbox via the application service account. 'full' adds the decoded plain-text body (capped at 100 KiB).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in appGetMessageInput) (*mcp.CallToolResult, MessageDetail, error) {
@@ -117,6 +119,7 @@ type appSendMailInput struct {
 func registerAppSendMail(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "app_send_mail",
+		Annotations: additiveAnnotations(),
 		Title:       "App: send mail as a user",
 		Description: "Send mail AS an explicit user via the application service account. Irreversible, so it is gated by the SEPARATE send gate: without " + config.EnvAllowSends + "=true it returns a dry-run preview showing the full message. Applied sends are logged with the requesting actor.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in appSendMailInput) (*mcp.CallToolResult, writeOutput, error) {
@@ -155,6 +158,7 @@ type appListEventsInput struct {
 func registerAppListEvents(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "app_list_events",
+		Annotations: readAnnotations(),
 		Title:       "App: list a user's events",
 		Description: "List events on an explicit user's primary calendar via the application service account, expanded to single instances and ordered by start time (default next 30 days).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in appListEventsInput) (*mcp.CallToolResult, listEventsOutput, error) {
@@ -181,6 +185,7 @@ type appListFilesInput struct {
 func registerAppListFiles(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "app_list_files",
+		Annotations: readAnnotations(),
 		Title:       "App: list a user's files",
 		Description: "List an explicit user's Drive files via the application service account (recent first, or filtered by a Drive query). Returns metadata; page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in appListFilesInput) (*mcp.CallToolResult, listFilesOutput, error) {
@@ -227,6 +232,7 @@ type appSetVacationInput struct {
 func registerAppSetVacation(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "app_set_vacation",
+		Annotations: destructiveAnnotations(),
 		Title:       "App: set a user's vacation responder",
 		Description: "Enable or disable an explicit user's Gmail vacation responder via the application service account. Reversible, so it rides the write gate. Applied changes are logged with the requesting actor.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in appSetVacationInput) (*mcp.CallToolResult, writeOutput, error) {

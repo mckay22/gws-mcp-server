@@ -124,6 +124,7 @@ type appBulkUserSuspendInput struct {
 func registerAppBulkUserSuspend(server *mcp.Server, gc *gapi.Client, cfg config.Config) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "app_bulk_user_suspend",
+		Annotations: destructiveAnnotations(),
 		Title:       "App: bulk suspend/un-suspend users",
 		Description: "Suspend or un-suspend many directory users in one call via the application service account (impersonating the configured admin). Reversible, so it rides the write gate. Returns per-user outcomes; duplicate targets are rejected. Applied batches are logged with the requesting actor.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in appBulkUserSuspendInput) (*mcp.CallToolResult, bulkOutput, error) {
@@ -155,6 +156,7 @@ type appBulkGroupAddInput struct {
 func registerAppBulkGroupAddMembers(server *mcp.Server, gc *gapi.Client, cfg config.Config) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "app_bulk_group_add_members",
+		Annotations: additiveAnnotations(),
 		Title:       "App: bulk add group members",
 		Description: "Add many members to a directory group in one call via the application service account (impersonating the configured admin). Reversible, so it rides the write gate. Returns per-member outcomes; duplicate members are rejected. Applied batches are logged with the requesting actor.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in appBulkGroupAddInput) (*mcp.CallToolResult, bulkOutput, error) {

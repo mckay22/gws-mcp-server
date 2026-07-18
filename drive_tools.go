@@ -82,6 +82,7 @@ type listFilesOutput struct {
 func registerListFiles(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_files",
+		Annotations: readAnnotations(),
 		Title:       "List/search Drive files",
 		Description: "List or search the signed-in user's Drive files. With no query, returns recent files (newest first). With a query, uses Drive's search syntax. Returns one page of metadata (no content); page with nextPageToken. Optionally spans shared drives.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listFilesInput) (*mcp.CallToolResult, listFilesOutput, error) {
@@ -156,6 +157,7 @@ type getFileContentOutput struct {
 func registerGetFileContent(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_file_content",
+		Annotations: readAnnotations(),
 		Title:       "Get Drive file content",
 		Description: "Fetch a file's text content by id. Google Docs/Sheets/Slides are exported (to plain text / CSV); other files are downloaded directly. Binary files without a text form are rejected. Content is capped at 200 KiB (truncated flag set when longer).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in getFileContentInput) (*mcp.CallToolResult, getFileContentOutput, error) {

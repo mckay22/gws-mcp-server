@@ -62,6 +62,7 @@ type auditActivitiesOutput struct {
 func registerAuditActivities(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "audit_activities",
+		Annotations: readAnnotations(),
 		Title:       "Query audit log activities",
 		Description: "Query the Admin Reports audit log for an application (login, admin, drive, token, …): who did what, when, and from where. Some applications/event types are edition-gated and will error cleanly. Requires an admin caller with reporting privileges. Page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in auditActivitiesInput) (*mcp.CallToolResult, auditActivitiesOutput, error) {
@@ -155,6 +156,7 @@ type connectedAppsOutput struct {
 func registerConnectedApps(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "user_connected_apps",
+		Annotations: readAnnotations(),
 		Title:       "List a user's connected OAuth apps",
 		Description: "List the third-party applications a user has granted OAuth access to (Directory tokens) — the connected-app / consent audit, with each app's granted scopes. Requires an admin caller with the user-security privilege.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in connectedAppsInput) (*mcp.CallToolResult, connectedAppsOutput, error) {
@@ -204,6 +206,7 @@ type licenseAssignmentsOutput struct {
 func registerLicenseAssignments(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "license_assignments",
+		Annotations: readAnnotations(),
 		Title:       "List license assignments",
 		Description: "List license assignments for a product (optionally a single SKU) across the account's users (Enterprise License Manager). Requires an admin caller; free/edition-limited tenants may return an error, which is surfaced. Page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in licenseAssignmentsInput) (*mcp.CallToolResult, licenseAssignmentsOutput, error) {

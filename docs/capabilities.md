@@ -7,6 +7,33 @@ Every tool acts as a real Google identity and Google enforces authorization —
 this server adds no permission model of its own. In classic-delegated mode that
 identity is the signed-in user, and all Gmail tools target `/users/me`.
 
+## Tool annotations
+
+Every tool advertises MCP tool annotations, so a client — or a policy layer in
+front of one — can judge a call without pattern-matching on tool names. The
+mapping from the legend above:
+
+| Legend | `readOnlyHint` | `destructiveHint` | `idempotentHint` | Applies to |
+| --- | --- | --- | --- | --- |
+| 🟢 read | `true` | — | — | the 35 read tools (incl. `health`) |
+| 🟡 / 🔴 additive | `false` | `false` | `false` | creates something new: drafts, events, uploads, group members, sent mail |
+| 🟡 / 🔴 overwrite or remove | `false` | `true` | `true` | patches a resource in place, cancels, removes, suspends |
+
+`openWorldHint` is `true` for every Google-backed tool and `false` only for
+`health`, which makes no Google call.
+
+Two things worth knowing when consuming these:
+
+- **They describe, they do not enforce.** The enforcement points are the write
+  and send gates and Google's own authorization. The MCP spec is explicit that a
+  client should treat annotations from an untrusted server as unverified claims.
+- **Irreversible is not the same as destructive.** `destructiveHint` follows the
+  spec's definition — deleting or overwriting, versus adding — so `gmail_send`
+  is `destructiveHint: false`: it creates a message and destroys nothing. Its
+  irreversibility is carried by the separate send gate (🔴), not by this hint. A
+  policy layer that cares about egress should key on the gate, not on
+  `destructiveHint` alone.
+
 ## Operational
 
 | Tool | Kind | Description |
