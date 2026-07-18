@@ -68,6 +68,11 @@ type writePlan struct {
 	Prepare func(ctx context.Context) (any, error)
 }
 
+// maxWriteResultBytes caps the Google response echoed back from an applied
+// write. The response is normally the one created/updated resource, but nothing
+// in this server bounds it, and it goes straight into model context.
+const maxWriteResultBytes = 32 << 10 // 32 KiB
+
 // writeOutput is the structured result of a write tool: the planned request plus
 // whether it was applied or only previewed.
 type writeOutput struct {
@@ -78,6 +83,9 @@ type writeOutput struct {
 	URL     string `json:"url"`
 	Body    any    `json:"body,omitempty"`
 	Result  string `json:"result,omitempty"`
+	// ResultTruncated reports that Google's response was longer than
+	// maxWriteResultBytes and the echo above was cut.
+	ResultTruncated bool `json:"resultTruncated,omitempty"`
 }
 
 // runWrite applies the appropriate gate to a plan.
@@ -88,8 +96,8 @@ type writeOutput struct {
 // names the exact env var and flag that open THIS plan's gate.
 //
 // When the gate is open it dispatches on plan.Method to the matching client write
-// (Post/PostRaw/Patch/Delete) and returns Applied=true. A failure surfaces as the
-// client's *gapi.Error, unchanged.
+// (Post/PostRaw/Patch/Delete) and returns Applied=true. A failure surfaces through
+// toolError, so it keeps Google's status and reason.
 func runWrite(ctx context.Context, gc *gapi.Client, allowWrites, allowSends bool, plan writePlan) (*mcp.CallToolResult, writeOutput, error) {
 	allowed, gateEnv, gateFlag := gateSettings(plan.Gate, allowWrites, allowSends)
 	displayURL := planURL(plan)
@@ -155,10 +163,18 @@ func runWrite(ctx context.Context, gc *gapi.Client, allowWrites, allowSends bool
 		return nil, writeOutput{}, fmt.Errorf("unsupported write method %q", plan.Method)
 	}
 	if err != nil {
-		return nil, writeOutput{}, err
+		// Same treatment the read tools give a Google failure: status and reason
+		// kept, so a refused write says whether it was a permission, a missing
+		// target, or throttling.
+		return nil, writeOutput{}, toolError(err)
 	}
 	if len(raw) > 0 {
-		out.Result = string(raw)
+		// Google's response to a write is small (the created/updated resource), but
+		// it is not bounded by anything this server controls, and it lands straight
+		// in model context. Cap it the way the read tools cap a body.
+		body, truncated := truncateUTF8(raw, maxWriteResultBytes)
+		out.Result = string(body)
+		out.ResultTruncated = truncated
 	}
 
 	return text("Applied: " + plan.Summary), out, nil

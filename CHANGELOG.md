@@ -11,6 +11,35 @@ by milestone.
 A follow-up review (MCP-spec compliance, tool-surface design, and the Google
 API call shapes) on top of the first pass below.
 
+- **(Medium) Tool errors keep Google's status and reason.** `toolError` reduced a
+  failure to its bare message, so 403-insufficient-scope, 404, 401-expired and a
+  survived-retries 429 all read alike and a caller could not tell which recovery
+  applied. Write failures went through unfiltered instead, so the two surfaces
+  disagreed; both now use the same form.
+- **(Medium) `gmail_set_vacation` stopped erasing settings it was not asked to
+  change.** Gmail's vacation endpoint is a PUT — it replaces the whole resource —
+  so disabling the responder wiped the stored subject, body, and schedule. It now
+  reads the current settings and overlays only the fields the call names (via the
+  same apply-time `Prepare` hook, so a dry run still calls nothing). The optional
+  flags became pointers so an omitted flag is distinguishable from an explicit
+  `false`, and the schedule window is settable at last. `gmail_get_vacation` now
+  reports `startTime`/`endTime` as RFC3339 instead of Gmail's raw epoch
+  milliseconds.
+- **(Medium) Pagination is consistent across every list tool.**
+  `tasks_list_tasklists` hardcoded 100 results and dropped `nextPageToken`,
+  silently truncating longer lists; `chat_list_spaces` hardcoded 100 with no
+  caller control; `list_calendars` auto-followed every page. All three now take
+  `maxResults`/`pageSize` and surface `nextPageToken` like the rest. With its last
+  caller gone, `gapi.Client.List` — the follow-every-page helper — is removed
+  rather than left as an invitation to reintroduce unbounded dumps.
+- **(Low) `fields` projections added to the Tasks, Gmail-settings, and freeBusy
+  reads**, which were fetching `etag`/`kind`/`selfLink` only to discard them.
+- **(Low) Assorted output-shape fixes.** A senderless Chat message serialized as
+  `"sender":{"name":""}` (`omitempty` never applies to a struct — now a pointer);
+  Calendar requested a top-level `timeZone` nothing read; `directory_*` schema
+  text said "1-100 (default 25; API max 500)", inviting a 500 that silently became
+  100; the Meet filter example omitted the quotes Meet's grammar requires; and an
+  applied write echoed Google's response with no size bound.
 - **(High) Resource-server token refresh no longer dies after ~1h.** The same
   captured-request-context bug fixed below for classic-delegated mode was still
   live on the DWD path: `GoogleToken` cached each user's token source built from

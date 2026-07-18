@@ -113,6 +113,7 @@ func registerPeopleSearch(server *mcp.Server, gc *gapi.Client) {
 // --- chat_list_spaces ---
 
 type chatListSpacesInput struct {
+	PageSize  int    `json:"pageSize,omitempty" jsonschema:"page size 1-100 (default 25)"`
 	PageToken string `json:"pageToken,omitempty" jsonschema:"continuation token"`
 }
 
@@ -136,7 +137,7 @@ func registerChatListSpaces(server *mcp.Server, gc *gapi.Client) {
 		Title:       "List Chat spaces",
 		Description: "List the Google Chat spaces the signed-in user is a member of (Workspace-only). Returns space ids (names) for use with chat_list_messages/chat_send_message.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in chatListSpacesInput) (*mcp.CallToolResult, chatListSpacesOutput, error) {
-		q := url.Values{"pageSize": {"100"}}
+		q := url.Values{"pageSize": {strconv.Itoa(clampLimit(in.PageSize))}}
 		if in.PageToken != "" {
 			q.Set("pageToken", in.PageToken)
 		}
@@ -164,14 +165,19 @@ type chatListMessagesInput struct {
 	PageToken string `json:"pageToken,omitempty" jsonschema:"continuation token"`
 }
 
+// ChatSender identifies who posted a Chat message.
+type ChatSender struct {
+	Name string `json:"name"`
+}
+
 // ChatMessage is a compact Google Chat message.
 type ChatMessage struct {
 	Name       string `json:"name"`
 	Text       string `json:"text,omitempty"`
 	CreateTime string `json:"createTime,omitempty"`
-	Sender     struct {
-		Name string `json:"name"`
-	} `json:"sender,omitempty"`
+	// A pointer so omitempty works: encoding/json never considers a struct
+	// empty, so a senderless message used to serialize as "sender":{"name":""}.
+	Sender *ChatSender `json:"sender,omitempty"`
 }
 
 type chatListMessagesOutput struct {
@@ -253,7 +259,7 @@ func registerChatSendMessage(server *mcp.Server, gc *gapi.Client, allowWrites, a
 // --- meet_conference_records ---
 
 type meetRecordsInput struct {
-	Filter    string `json:"filter,omitempty" jsonschema:"optional Meet filter, e.g. \"space.meeting_code=abc-mnop-xyz\" or a time range"`
+	Filter    string `json:"filter,omitempty" jsonschema:"optional Meet filter; values must be quoted, e.g. space.meeting_code = \"abc-mnop-xyz\" or start_time >= \"2026-07-01T00:00:00Z\""`
 	PageSize  int    `json:"pageSize,omitempty" jsonschema:"max records 1-50 (default 10)"`
 	PageToken string `json:"pageToken,omitempty" jsonschema:"continuation token"`
 }

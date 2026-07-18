@@ -1,9 +1,14 @@
 // Package gapi is a thin HTTP client for the Google REST APIs (Gmail, Calendar,
 // Drive, the Admin SDK, Reports, …). It deliberately avoids the generated
 // google.golang.org/api clients (whose model trees bloat the binary): it owns
-// just the request plumbing the tools need — bearer auth, nextPageToken paging,
-// fields projection, and Retry-After / 429 / 503 / rate-limit-403 backoff — and
-// returns raw JSON for callers to decode into their own shapes.
+// just the request plumbing the tools need — bearer auth, fields projection, and
+// Retry-After / 429 / 503 / rate-limit-403 backoff — and returns raw JSON for
+// callers to decode into their own shapes.
+//
+// It deliberately offers no follow-every-page helper. Each list tool fetches one
+// bounded page and surfaces Google's nextPageToken, so the caller decides whether
+// to continue; a client-side auto-pager would quietly turn one tool call into an
+// unbounded dump into model context.
 //
 // Unlike a single-host client, Google's APIs live on several hosts
 // (gmail.googleapis.com, www.googleapis.com, admin.googleapis.com). Callers pass
@@ -93,11 +98,6 @@ const (
 	// maxRetryDelay caps any single backoff wait, so a hostile or huge
 	// Retry-After can't stall the caller indefinitely.
 	maxRetryDelay = 30 * time.Second
-
-	// maxPages and maxItems bound collection paging so a pathological
-	// nextPageToken chain can't loop unbounded.
-	maxPages = 200
-	maxItems = 50000
 )
 
 // TokenSource supplies a Google access token for a request. Implementations may
@@ -191,55 +191,6 @@ func (c *Client) Get(ctx context.Context, base, path string, query url.Values) (
 		return nil, err
 	}
 	return json.RawMessage(resp.body), nil
-}
-
-// List fetches a collection at base+path, following Google's nextPageToken
-// across pages, and returns every element of the itemsField arrays concatenated
-// in order. itemsField is the response key holding the array — it varies per
-// API (Gmail "messages"/"labels", Calendar/Drive "items"/"files", Directory
-// "users"/"groups"). Paging is bounded by maxPages/maxItems.
-func (c *Client) List(ctx context.Context, base, path string, query url.Values, itemsField string) ([]json.RawMessage, error) {
-	q := cloneValues(query)
-	var items []json.RawMessage
-
-	for page := 0; ; page++ {
-		if page >= maxPages {
-			return nil, fmt.Errorf("listing %s: exceeded max pages (%d)", path, maxPages)
-		}
-
-		raw, err := c.Get(ctx, base, path, q)
-		if err != nil {
-			return nil, err
-		}
-
-		// The array key varies per API but nextPageToken is universal, so decode
-		// the envelope dynamically.
-		var envelope map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &envelope); err != nil {
-			return nil, fmt.Errorf("decoding %s collection: %w", path, err)
-		}
-		if arr, ok := envelope[itemsField]; ok {
-			var pageItems []json.RawMessage
-			if err := json.Unmarshal(arr, &pageItems); err != nil {
-				return nil, fmt.Errorf("decoding %s.%s: %w", path, itemsField, err)
-			}
-			items = append(items, pageItems...)
-			if len(items) > maxItems {
-				return nil, fmt.Errorf("listing %s: exceeded max items (%d)", path, maxItems)
-			}
-		}
-
-		var nextToken string
-		if nt, ok := envelope["nextPageToken"]; ok {
-			if err := json.Unmarshal(nt, &nextToken); err != nil {
-				return nil, fmt.Errorf("decoding %s.nextPageToken: %w", path, err)
-			}
-		}
-		if nextToken == "" {
-			return items, nil
-		}
-		q.Set("pageToken", nextToken)
-	}
 }
 
 // GetRaw fetches base+path and returns the response body verbatim (not decoded
@@ -537,15 +488,4 @@ func decodeError(body []byte) *Error {
 		return nil
 	}
 	return &Error{Message: env.Error.Message, Reason: reason}
-}
-
-// cloneValues deep-copies url.Values so mutating the copy (e.g. adding
-// pageToken) never touches the caller's map. A nil input yields a fresh, usable
-// map.
-func cloneValues(in url.Values) url.Values {
-	out := make(url.Values, len(in))
-	for k, vs := range in {
-		out[k] = append([]string(nil), vs...)
-	}
-	return out
 }

@@ -43,7 +43,7 @@ const (
 
 type directoryUsersSearchInput struct {
 	Query      string `json:"query,omitempty" jsonschema:"Admin SDK users query (e.g. \"email:ada*\", \"name:Ada\", \"orgUnitPath=/Sales\", \"isAdmin=true\"); omit to list all users"`
-	MaxResults int    `json:"maxResults,omitempty" jsonschema:"page size 1-100 (default 25; API max 500)"`
+	MaxResults int    `json:"maxResults,omitempty" jsonschema:"page size 1-100 (default 25)"`
 	PageToken  string `json:"pageToken,omitempty" jsonschema:"continuation token from a previous call's nextPageToken"`
 	OrderBy    string `json:"orderBy,omitempty" jsonschema:"sort field: email (default), givenName, or familyName"`
 }

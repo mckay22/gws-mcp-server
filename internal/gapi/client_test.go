@@ -109,54 +109,6 @@ func TestGetDecodesLegacyErrorReason(t *testing.T) {
 	}
 }
 
-func TestListFollowsNextPageToken(t *testing.T) {
-	var hits int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Query().Get("pageToken") {
-		case "":
-			_, _ = w.Write([]byte(`{"messages":[{"id":"a"},{"id":"b"}],"nextPageToken":"p2"}`))
-		case "p2":
-			_, _ = w.Write([]byte(`{"messages":[{"id":"c"}],"nextPageToken":"p3"}`))
-		case "p3":
-			_, _ = w.Write([]byte(`{"messages":[{"id":"d"}]}`)) // no nextPageToken → last page
-		default:
-			t.Errorf("unexpected pageToken %q", r.URL.Query().Get("pageToken"))
-		}
-		atomic.AddInt32(&hits, 1)
-	}))
-	defer srv.Close()
-
-	c := newClient(t, srv, staticToken{token: "t"})
-	items, err := c.List(context.Background(), BaseGmail, "/users/me/messages", nil, "messages")
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(items) != 4 {
-		t.Fatalf("got %d items across pages, want 4", len(items))
-	}
-	if hits != 3 {
-		t.Errorf("server hits = %d, want 3 pages", hits)
-	}
-}
-
-func TestListEmptyCollection(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		// Gmail omits the array entirely when there are no results.
-		_, _ = w.Write([]byte(`{"resultSizeEstimate":0}`))
-	}))
-	defer srv.Close()
-
-	c := newClient(t, srv, staticToken{token: "t"})
-	items, err := c.List(context.Background(), BaseGmail, "/users/me/messages", nil, "messages")
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(items) != 0 {
-		t.Errorf("got %d items, want 0", len(items))
-	}
-}
-
 func TestRetryOn429ThenSuccess(t *testing.T) {
 	var attempts int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

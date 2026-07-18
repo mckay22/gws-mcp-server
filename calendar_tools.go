@@ -32,7 +32,8 @@ const (
 // fields projections for Calendar responses.
 const (
 	calendarListFields = "items(id,summary,description,primary,accessRole,timeZone,selected),nextPageToken"
-	eventListFields    = "items(id,status,summary,location,start,end,organizer(email,displayName,self),attendees(email,responseStatus),hangoutLink,htmlLink,recurringEventId),nextPageToken,timeZone"
+	eventListFields    = "items(id,status,summary,location,start,end,organizer(email,displayName,self),attendees(email,responseStatus),hangoutLink,htmlLink,recurringEventId),nextPageToken"
+	freeBusyFields     = "calendars(busy,errors)"
 	eventGetFields     = "id,status,summary,description,location,start,end,organizer(email,displayName,self),attendees(email,responseStatus),hangoutLink,htmlLink,recurringEventId,created,updated"
 )
 
@@ -81,7 +82,10 @@ type Event struct {
 
 // --- list_calendars ---
 
-type listCalendarsInput struct{}
+type listCalendarsInput struct {
+	MaxResults int    `json:"maxResults,omitempty" jsonschema:"page size 1-100 (default 25)"`
+	PageToken  string `json:"pageToken,omitempty" jsonschema:"continuation token from a previous call's nextPageToken"`
+}
 
 // CalendarRef is a compact entry from the user's calendar list.
 type CalendarRef struct {
@@ -95,8 +99,9 @@ type CalendarRef struct {
 }
 
 type listCalendarsOutput struct {
-	Calendars []CalendarRef `json:"calendars"`
-	Count     int           `json:"count"`
+	Calendars     []CalendarRef `json:"calendars"`
+	Count         int           `json:"count"`
+	NextPageToken string        `json:"nextPageToken,omitempty"`
 }
 
 func registerListCalendars(server *mcp.Server, gc *gapi.Client) {
@@ -104,22 +109,34 @@ func registerListCalendars(server *mcp.Server, gc *gapi.Client) {
 		Name:        "list_calendars",
 		Annotations: readAnnotations(),
 		Title:       "List calendars",
-		Description: "List the calendars on the signed-in user's calendar list, with their ids (use as calendarId in list_events/get_event), access role, and time zone.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ listCalendarsInput) (*mcp.CallToolResult, listCalendarsOutput, error) {
-		q := url.Values{"fields": {calendarListFields}}
-		items, err := gc.List(ctx, gapi.BaseCalendar, "/users/me/calendarList", q, "items")
+		Description: "List the calendars on the signed-in user's calendar list, with their ids (use as calendarId in list_events/get_event), access role, and time zone. Page with nextPageToken.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listCalendarsInput) (*mcp.CallToolResult, listCalendarsOutput, error) {
+		// One bounded page plus a token, like every other list tool here. This used
+		// to auto-follow every page, so a user subscribed to hundreds of calendars
+		// got them all in one result with no way to ask for less.
+		q := url.Values{
+			"fields":     {calendarListFields},
+			"maxResults": {strconv.Itoa(clampLimit(in.MaxResults))},
+		}
+		if in.PageToken != "" {
+			q.Set("pageToken", in.PageToken)
+		}
+		raw, err := gc.Get(ctx, gapi.BaseCalendar, "/users/me/calendarList", q)
 		if err != nil {
 			return nil, listCalendarsOutput{}, toolError(err)
 		}
-		cals := make([]CalendarRef, 0, len(items))
-		for _, raw := range items {
-			var c CalendarRef
-			if err := json.Unmarshal(raw, &c); err != nil {
-				return nil, listCalendarsOutput{}, fmt.Errorf("decoding calendar: %w", err)
-			}
-			cals = append(cals, c)
+		var env struct {
+			Items         []CalendarRef `json:"items"`
+			NextPageToken string        `json:"nextPageToken"`
 		}
-		out := listCalendarsOutput{Calendars: cals, Count: len(cals)}
+		if err := json.Unmarshal(raw, &env); err != nil {
+			return nil, listCalendarsOutput{}, fmt.Errorf("decoding calendars: %w", err)
+		}
+		cals := env.Items
+		if cals == nil {
+			cals = []CalendarRef{}
+		}
+		out := listCalendarsOutput{Calendars: cals, Count: len(cals), NextPageToken: env.NextPageToken}
 		return text(fmt.Sprintf("%d calendars", out.Count)), out, nil
 	})
 }
@@ -304,7 +321,8 @@ func registerFreeBusy(server *mcp.Server, gc *gapi.Client) {
 		}
 
 		body := map[string]any{"timeMin": timeMin, "timeMax": timeMax, "items": items}
-		raw, err := gc.Post(ctx, gapi.BaseCalendar, "/freeBusy", nil, body)
+		raw, err := gc.Post(ctx, gapi.BaseCalendar, "/freeBusy",
+			url.Values{"fields": {freeBusyFields}}, body)
 		if err != nil {
 			return nil, freeBusyOutput{}, toolError(err)
 		}

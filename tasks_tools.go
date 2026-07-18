@@ -22,9 +22,19 @@ func registerTasksTools(server *mcp.Server, gc *gapi.Client, allowWrites, allowS
 	registerTaskComplete(server, gc, allowWrites, allowSends)
 }
 
+// fields projections keep the Tasks responses to what the tools surface
+// (etag/selfLink/kind are fetched and discarded otherwise).
+const (
+	tasklistFields = "items(id,title,updated),nextPageToken"
+	taskFields     = "items(id,title,notes,status,due),nextPageToken"
+)
+
 // --- tasks_list_tasklists ---
 
-type listTasklistsInput struct{}
+type listTasklistsInput struct {
+	MaxResults int    `json:"maxResults,omitempty" jsonschema:"page size 1-100 (default 25)"`
+	PageToken  string `json:"pageToken,omitempty" jsonschema:"continuation token from a previous call's nextPageToken"`
+}
 
 // Tasklist is a compact task list.
 type Tasklist struct {
@@ -34,8 +44,9 @@ type Tasklist struct {
 }
 
 type listTasklistsOutput struct {
-	Tasklists []Tasklist `json:"tasklists"`
-	Count     int        `json:"count"`
+	Tasklists     []Tasklist `json:"tasklists"`
+	Count         int        `json:"count"`
+	NextPageToken string     `json:"nextPageToken,omitempty"`
 }
 
 func registerListTasklists(server *mcp.Server, gc *gapi.Client) {
@@ -43,19 +54,27 @@ func registerListTasklists(server *mcp.Server, gc *gapi.Client) {
 		Name:        "tasks_list_tasklists",
 		Annotations: readAnnotations(),
 		Title:       "List task lists",
-		Description: "List the signed-in user's Google Tasks lists, with their ids (use as tasklist in the other task tools).",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ listTasklistsInput) (*mcp.CallToolResult, listTasklistsOutput, error) {
-		raw, err := gc.Get(ctx, gapi.BaseTasks, "/users/@me/lists", url.Values{"maxResults": {"100"}})
+		Description: "List the signed-in user's Google Tasks lists, with their ids (use as tasklist in the other task tools). Page with nextPageToken.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listTasklistsInput) (*mcp.CallToolResult, listTasklistsOutput, error) {
+		q := url.Values{
+			"maxResults": {strconv.Itoa(clampLimit(in.MaxResults))},
+			"fields":     {tasklistFields},
+		}
+		if in.PageToken != "" {
+			q.Set("pageToken", in.PageToken)
+		}
+		raw, err := gc.Get(ctx, gapi.BaseTasks, "/users/@me/lists", q)
 		if err != nil {
 			return nil, listTasklistsOutput{}, toolError(err)
 		}
 		var env struct {
-			Items []Tasklist `json:"items"`
+			Items         []Tasklist `json:"items"`
+			NextPageToken string     `json:"nextPageToken"`
 		}
 		if err := json.Unmarshal(raw, &env); err != nil {
 			return nil, listTasklistsOutput{}, fmt.Errorf("decoding task lists: %w", err)
 		}
-		out := listTasklistsOutput{Tasklists: env.Items, Count: len(env.Items)}
+		out := listTasklistsOutput{Tasklists: env.Items, Count: len(env.Items), NextPageToken: env.NextPageToken}
 		return text(fmt.Sprintf("%d task lists", out.Count)), out, nil
 	})
 }
@@ -92,7 +111,7 @@ func registerListTasks(server *mcp.Server, gc *gapi.Client) {
 		Description: "List tasks in a task list (default the user's default list). Excludes completed tasks unless requested. Page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listTasksInput) (*mcp.CallToolResult, listTasksOutput, error) {
 		tasklist := taskListOrDefault(in.Tasklist)
-		q := url.Values{}
+		q := url.Values{"fields": {taskFields}}
 		q.Set("maxResults", strconv.Itoa(clampLimit(in.MaxResults)))
 		if in.ShowCompleted {
 			q.Set("showCompleted", "true")

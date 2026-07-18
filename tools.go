@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
 	"strings"
 	"unicode/utf8"
 
@@ -150,14 +152,27 @@ func jsonString(v any) (string, error) {
 	return string(b), nil
 }
 
-// toolError surfaces a Google API failure to the caller: when the client returns
-// a *gapi.Error, its human-readable Message becomes the tool error; any other
-// error is passed through unchanged. The bearer token and request body are never
-// part of a *gapi.Error, so nothing sensitive leaks.
+// toolError surfaces a Google API failure to the caller, keeping the HTTP status
+// and Google's reason alongside the human-readable message.
+//
+// Those two carry the part a caller has to act on: 403 insufficientPermissions
+// ("this deployment was not granted the scope") calls for something different
+// from 404 ("it is not there"), from 429 ("slow down" — surviving the client's own
+// retries), from 401 ("the credential expired"). Reduced to the bare message, as
+// this once did, every failure reads alike and a model cannot tell which of those
+// it hit. Any non-Google error passes through unchanged. Neither the bearer token
+// nor the request body is ever part of a *gapi.Error, so nothing sensitive leaks.
 func toolError(err error) error {
 	var ge *gapi.Error
-	if errors.As(err, &ge) && ge.Message != "" {
-		return errors.New(ge.Message)
+	if !errors.As(err, &ge) {
+		return err
 	}
-	return err
+	msg := ge.Message
+	if msg == "" {
+		msg = http.StatusText(ge.Status)
+	}
+	if ge.Reason != "" {
+		return fmt.Errorf("google %d %s: %s", ge.Status, ge.Reason, msg)
+	}
+	return fmt.Errorf("google %d: %s", ge.Status, msg)
 }

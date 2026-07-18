@@ -47,7 +47,8 @@ func mockPowerful(t *testing.T) (*httptest.Server, *powerfulCapture) {
 
 	// Gmail settings.
 	mux.HandleFunc("GET /gmail/v1/users/me/settings/vacation", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, `{"enableAutoReply":true,"responseSubject":"OOO","responseBodyPlainText":"Away until Monday"}`)
+		// 1782864000000 = 2026-07-01T00:00:00Z, the epoch-millisecond form Gmail uses.
+		writeJSON(w, http.StatusOK, `{"enableAutoReply":true,"responseSubject":"OOO","responseBodyPlainText":"Away until Monday","startTime":"1782864000000"}`)
 	})
 	mux.HandleFunc("PUT /gmail/v1/users/me/settings/vacation", func(w http.ResponseWriter, r *http.Request) {
 		record(r)
@@ -311,5 +312,85 @@ func TestTasksListShowsHiddenWhenCompletedRequested(t *testing.T) {
 	defer cap.mu.Unlock()
 	if strings.Contains(cap.query, "showHidden=true") {
 		t.Errorf("default listing = %q, should not request hidden tasks", cap.query)
+	}
+}
+
+// TestSetVacationPreservesStoredFields covers Gmail's vacation endpoint being a
+// PUT: it replaces the whole resource, so sending only the fields a call names
+// blanks the rest. Disabling the responder used to erase the stored subject,
+// body, and schedule that nobody asked to change.
+func TestSetVacationPreservesStoredFields(t *testing.T) {
+	srv, cap := mockPowerful(t)
+	cs := connectPowerful(t, srv, true, false) // write gate open
+
+	// Disable, naming nothing else. The stored message must survive.
+	callTool(t, cs, "gmail_set_vacation", map[string]any{"enable": false})
+
+	cap.mu.Lock()
+	body := cap.body
+	cap.mu.Unlock()
+	if !strings.Contains(body, `"enableAutoReply":false`) {
+		t.Errorf("responder was not disabled: %s", body)
+	}
+	for _, want := range []string{"OOO", "Away until Monday"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("PUT dropped stored vacation content %q — disabling must not erase it: %s", want, body)
+		}
+	}
+
+	// An explicitly named field replaces the stored one.
+	callTool(t, cs, "gmail_set_vacation", map[string]any{
+		"enable":  true,
+		"subject": "Back on the 3rd",
+	})
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	if !strings.Contains(cap.body, "Back on the 3rd") {
+		t.Errorf("new subject not applied: %s", cap.body)
+	}
+	if !strings.Contains(cap.body, "Away until Monday") {
+		t.Errorf("body should still be carried over when not specified: %s", cap.body)
+	}
+}
+
+// A closed write gate must still make no Google call, including the read behind
+// the merge.
+func TestSetVacationDryRunCallsNothing(t *testing.T) {
+	srv, cap := mockPowerful(t)
+	cs := connectPowerful(t, srv, false, false)
+
+	_, out := callTool(t, cs, "gmail_set_vacation", map[string]any{"enable": true, "subject": "OOO"})
+	if out["dryRun"] != true {
+		t.Errorf("expected a dry run: %v", out)
+	}
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	if cap.called {
+		t.Error("dry run wrote to Google")
+	}
+}
+
+func TestSetVacationValidatesSchedule(t *testing.T) {
+	srv, _ := mockPowerful(t)
+	cs := connectPowerful(t, srv, true, false)
+
+	msg := callToolErr(t, cs, "gmail_set_vacation", map[string]any{
+		"enable":    true,
+		"startTime": "next tuesday",
+	})
+	if !strings.Contains(msg, "RFC3339") || !strings.Contains(msg, "startTime") {
+		t.Errorf("error = %q, want it to name startTime and RFC3339", msg)
+	}
+}
+
+// Gmail carries the schedule as epoch milliseconds, which tells a reader nothing.
+func TestGetVacationReportsRFC3339Times(t *testing.T) {
+	srv, _ := mockPowerful(t)
+	cs := connectPowerful(t, srv, false, false)
+
+	_, out := callTool(t, cs, "gmail_get_vacation", map[string]any{})
+	start, _ := out["startTime"].(string)
+	if start != "2026-07-01T00:00:00Z" {
+		t.Errorf("startTime = %q, want RFC3339 2026-07-01T00:00:00Z", start)
 	}
 }
