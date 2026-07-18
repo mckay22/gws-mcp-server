@@ -96,6 +96,10 @@ func registerListTasks(server *mcp.Server, gc *gapi.Client) {
 		q.Set("maxResults", strconv.Itoa(clampLimit(in.MaxResults)))
 		if in.ShowCompleted {
 			q.Set("showCompleted", "true")
+			// Completing a task in the Google Tasks UI also marks it hidden, and
+			// showCompleted alone still filters hidden tasks out — so without this
+			// the "include completed" option returns almost none of them.
+			q.Set("showHidden", "true")
 		} else {
 			q.Set("showCompleted", "false")
 		}

@@ -56,8 +56,8 @@ on its DWD authorization, it can mint a token as *any* user in the domain. So:
 - Provide the key by **path** at runtime, stored outside the repo; it is never
   logged and its presence is reported as a boolean only.
 - This backend is recommended **only behind an authenticating gateway** in shared
-  deployments — the gateway (e.g. `warden`) owns role-based tool exposure and
-  deny policies; this server stays policy-free.
+  deployments — the gateway owns role-based tool exposure and deny policies; this
+  server stays policy-free.
 - A non-loopback `--http` bind is refused unless resource-server mode is
   configured, because only then is every request authenticated.
 

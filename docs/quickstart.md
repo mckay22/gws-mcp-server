@@ -76,9 +76,11 @@ mapped user via a DWD service account.
    `/.well-known/oauth-protected-resource` (RFC 9728). Because every request is
    authenticated, a non-loopback bind is allowed.
 
-**Run this behind an authenticating gateway** (e.g. `warden`): the gateway owns
-role-based tool exposure and deny policies; this server stays policy-free and
-lets Google enforce each impersonated user's rights.
+**Run this behind an authenticating gateway**: the gateway owns role-based tool
+exposure and deny policies; this server stays policy-free and lets Google enforce
+each impersonated user's rights. Tool annotations (see
+[capabilities](capabilities.md#tool-annotations)) give such a gateway a
+per-tool read-only/destructive signal to write policy against.
 
 ### Application tier (`--app-only`)
 
@@ -103,8 +105,14 @@ docker run --rm -p 8080:8080 \
   -e GWS_ISSUERS=https://keycloak.example/realms/main \
   -e GWS_DWD_SA_KEY=/keys/dwd-sa.json \
   -v /path/to/dwd-sa.json:/keys/dwd-sa.json:ro \
-  gws-mcp-server --http :8080
+  gws-mcp-server --http 0.0.0.0:8080
 ```
+
+Note the explicit `0.0.0.0`. A bare `--http :8080` binds loopback *inside* the
+container, so `-p 8080:8080` would forward to nothing — a host-published port
+needs the server listening on all interfaces. This is allowed only because
+resource-server mode authenticates every request; without it the server refuses
+a non-loopback bind outright.
 
 The image is a scratch-based static binary (+ CA certs) running as an
 unprivileged uid. It is intended for resource-server mode; classic-delegated

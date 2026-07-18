@@ -77,6 +77,20 @@ API call shapes) on top of the first pass below.
   bogus parts. Each upload now uses a fresh 128-bit random boundary.
 - **(Medium) `gmail_modify` path-escapes its message id**, the one place in the
   tool surface that interpolated a caller-supplied id into a URL path unescaped.
+- **(Medium) Three Google API quirks that returned quietly misleading data.**
+  `chat_list_messages` sent no `orderBy`, and Chat defaults to `createTime ASC`,
+  so it returned the *oldest* messages in a space — a model asked what was
+  happening in a channel read the beginning of its history; it now orders newest
+  first. `tasks_list` with `showCompleted` omitted tasks completed through the
+  Google Tasks UI, because completion also marks a task hidden and `showHidden`
+  is a separate flag; both are now sent together. `audit_activities` projected
+  away `events.parameters`, so a Drive row said "download" with no document and
+  an admin row had no target — the audit tool could report what kind of thing
+  happened but never what it happened to. Parameters are now requested and
+  flattened from Google's four typed value fields into plain name/value pairs.
+- **(Low) Docs: the Docker quickstart now binds `0.0.0.0`.** The example passed
+  `--http :8080`, which binds loopback *inside* the container, so the published
+  `-p 8080:8080` port forwarded to nothing.
 - **(Medium) Cross-origin protection on the MCP endpoint.** The streamable HTTP
   handler is wrapped in `net/http`'s `CrossOriginProtection` (the SDK applies
   none by default in v1.6.x), rejecting cross-origin browser requests as

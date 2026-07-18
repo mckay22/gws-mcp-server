@@ -34,6 +34,15 @@ func mockPowerful(t *testing.T) (*httptest.Server, *powerfulCapture) {
 		cap.query = r.URL.RawQuery
 		cap.mu.Unlock()
 	}
+	// recordRead captures a read's path/query WITHOUT setting called, which the
+	// gate tests use to mean "a mutation reached Google".
+	recordRead := func(r *http.Request) {
+		cap.mu.Lock()
+		cap.method = r.Method
+		cap.path = r.URL.Path
+		cap.query = r.URL.RawQuery
+		cap.mu.Unlock()
+	}
 	mux := http.NewServeMux()
 
 	// Gmail settings.
@@ -55,7 +64,8 @@ func mockPowerful(t *testing.T) (*httptest.Server, *powerfulCapture) {
 	mux.HandleFunc("GET /tasks/v1/users/@me/lists", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, `{"items":[{"id":"list1","title":"My Tasks"}]}`)
 	})
-	mux.HandleFunc("GET /tasks/v1/lists/{list}/tasks", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /tasks/v1/lists/{list}/tasks", func(w http.ResponseWriter, r *http.Request) {
+		recordRead(r)
 		writeJSON(w, http.StatusOK, `{"items":[{"id":"t1","title":"Buy milk","status":"needsAction"}]}`)
 	})
 	mux.HandleFunc("POST /tasks/v1/lists/{list}/tasks", func(w http.ResponseWriter, r *http.Request) {
@@ -77,7 +87,8 @@ func mockPowerful(t *testing.T) (*httptest.Server, *powerfulCapture) {
 	mux.HandleFunc("GET /v1/spaces", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, `{"spaces":[{"name":"spaces/AAAA","displayName":"Team","spaceType":"SPACE"}]}`)
 	})
-	mux.HandleFunc("GET /v1/spaces/{space}/messages", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /v1/spaces/{space}/messages", func(w http.ResponseWriter, r *http.Request) {
+		recordRead(r)
 		writeJSON(w, http.StatusOK, `{"messages":[{"name":"spaces/AAAA/messages/1","text":"hi"}]}`)
 	})
 	mux.HandleFunc("POST /v1/spaces/{space}/messages", func(w http.ResponseWriter, r *http.Request) {
@@ -257,5 +268,48 @@ func TestMeetAndSharedWithMe(t *testing.T) {
 	defer cap.mu.Unlock()
 	if !strings.Contains(cap.query, "sharedWithMe") {
 		t.Errorf("shared-with-me query = %q", cap.query)
+	}
+}
+
+// TestChatListMessagesReturnsNewestFirst guards against Chat's default ordering.
+// spaces.messages.list defaults to createTime ASC, so a 25-message page returned
+// the OLDEST messages in the space — a model asked "what's happening in here"
+// would read the start of the space's history and report it as current.
+func TestChatListMessagesReturnsNewestFirst(t *testing.T) {
+	srv, cap := mockPowerful(t)
+	cs := connectPowerful(t, srv, false, false)
+
+	callTool(t, cs, "chat_list_messages", map[string]any{"space": "spaces/AAAA"})
+
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	if !strings.Contains(cap.query, "orderBy=createTime+desc") &&
+		!strings.Contains(cap.query, "orderBy=createTime%20desc") {
+		t.Errorf("query = %q, want orderBy=createTime desc (Chat defaults to oldest-first)", cap.query)
+	}
+}
+
+// TestTasksListShowsHiddenWhenCompletedRequested guards the Tasks quirk:
+// completing a task in the Google Tasks UI also marks it hidden, and
+// showCompleted alone still filters hidden tasks out — so "include completed"
+// came back with almost none of them.
+func TestTasksListShowsHiddenWhenCompletedRequested(t *testing.T) {
+	srv, cap := mockPowerful(t)
+	cs := connectPowerful(t, srv, false, false)
+
+	callTool(t, cs, "tasks_list", map[string]any{"showCompleted": true})
+	cap.mu.Lock()
+	q := cap.query
+	cap.mu.Unlock()
+	if !strings.Contains(q, "showCompleted=true") || !strings.Contains(q, "showHidden=true") {
+		t.Errorf("query = %q, want both showCompleted=true and showHidden=true", q)
+	}
+
+	// The default listing asks for neither.
+	callTool(t, cs, "tasks_list", map[string]any{})
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	if strings.Contains(cap.query, "showHidden=true") {
+		t.Errorf("default listing = %q, should not request hidden tasks", cap.query)
 	}
 }

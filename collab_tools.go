@@ -185,7 +185,7 @@ func registerChatListMessages(server *mcp.Server, gc *gapi.Client) {
 		Name:        "chat_list_messages",
 		Annotations: readAnnotations(),
 		Title:       "List Chat messages",
-		Description: "List messages in a Google Chat space (Workspace-only). Page with nextPageToken.",
+		Description: "List messages in a Google Chat space (Workspace-only), most recent first. Page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in chatListMessagesInput) (*mcp.CallToolResult, chatListMessagesOutput, error) {
 		space := strings.TrimSpace(in.Space)
 		if space == "" {
@@ -193,7 +193,13 @@ func registerChatListMessages(server *mcp.Server, gc *gapi.Client) {
 		}
 		space = strings.TrimPrefix(space, "spaces/")
 		size := clampLimit(in.PageSize)
-		q := url.Values{"pageSize": {strconv.Itoa(size)}}
+		// Chat defaults to createTime ASC — the OLDEST messages in the space. A
+		// caller asking "what's happening here" wants the newest, and with a 25-item
+		// page the default would hand back the start of the space's history.
+		q := url.Values{
+			"pageSize": {strconv.Itoa(size)},
+			"orderBy":  {"createTime desc"},
+		}
 		if in.PageToken != "" {
 			q.Set("pageToken", in.PageToken)
 		}

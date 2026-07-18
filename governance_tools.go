@@ -25,7 +25,14 @@ func registerGovernanceReadTools(server *mcp.Server, gc *gapi.Client) {
 }
 
 // auditActivityFields projects the Reports activity list to an audit overview.
-const auditActivityFields = "items(id(time,uniqueQualifier,applicationName),actor(email,profileId),ipAddress,events(type,name)),nextPageToken"
+//
+// events.parameters is included deliberately: without it a row says "a download
+// happened" or "a setting changed" but never which document or which setting,
+// which is most of what an audit question is actually asking. Parameter values
+// arrive in whichever typed field fits (value/multiValue/boolValue/intValue), so
+// all four are projected.
+const auditActivityFields = "items(id(time,uniqueQualifier,applicationName),actor(email,profileId),ipAddress," +
+	"events(type,name,parameters(name,value,multiValue,boolValue,intValue))),nextPageToken"
 
 // --- audit_activities ---
 
@@ -39,10 +46,59 @@ type auditActivitiesInput struct {
 	PageToken   string `json:"pageToken,omitempty" jsonschema:"continuation token"`
 }
 
+// EventParameter is one name/value detail of an audited event — the document
+// touched, the setting changed, the user affected. Google returns the value in
+// whichever typed field fits the parameter, so Value carries whichever was set,
+// normalized to a string (or a comma-joined list for a multi-value parameter).
+type EventParameter struct {
+	Name  string `json:"name,omitempty"`
+	Value string `json:"value,omitempty"`
+}
+
 // EventRef is a single audited event within an activity.
 type EventRef struct {
-	Type string `json:"type,omitempty"`
-	Name string `json:"name,omitempty"`
+	Type       string           `json:"type,omitempty"`
+	Name       string           `json:"name,omitempty"`
+	Parameters []EventParameter `json:"parameters,omitempty"`
+}
+
+// UnmarshalJSON flattens Google's typed parameter shape
+// ({"name":"doc_id","value":"1a2b"} / {"boolValue":true} / {"multiValue":[…]})
+// into plain name/value pairs, so a caller reads one field instead of four.
+func (e *EventRef) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		Type       string `json:"type"`
+		Name       string `json:"name"`
+		Parameters []struct {
+			Name       string   `json:"name"`
+			Value      *string  `json:"value"`
+			MultiValue []string `json:"multiValue"`
+			BoolValue  *bool    `json:"boolValue"`
+			IntValue   *string  `json:"intValue"` // Google sends int64 as a string
+		} `json:"parameters"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	e.Type, e.Name = raw.Type, raw.Name
+	e.Parameters = nil
+	for _, p := range raw.Parameters {
+		var v string
+		switch {
+		case p.Value != nil:
+			v = *p.Value
+		case len(p.MultiValue) > 0:
+			v = strings.Join(p.MultiValue, ", ")
+		case p.BoolValue != nil:
+			v = strconv.FormatBool(*p.BoolValue)
+		case p.IntValue != nil:
+			v = *p.IntValue
+		default:
+			continue // a parameter with no value carries nothing worth reporting
+		}
+		e.Parameters = append(e.Parameters, EventParameter{Name: p.Name, Value: v})
+	}
+	return nil
 }
 
 // AuditActivity is a compact audit-log entry.

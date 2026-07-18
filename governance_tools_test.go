@@ -27,7 +27,15 @@ func mockGovernance(t *testing.T) (*httptest.Server, *govCapture) {
 		cap.activityQ = r.URL.RawQuery
 		cap.mu.Unlock()
 		writeJSON(w, http.StatusOK, `{"items":[
-			{"id":{"time":"2026-07-16T10:00:00Z","applicationName":"login"},"actor":{"email":"ada@example.com"},"ipAddress":"203.0.113.5","events":[{"type":"login","name":"login_success"}]}
+			{"id":{"time":"2026-07-16T10:00:00Z","applicationName":"login"},"actor":{"email":"ada@example.com"},"ipAddress":"203.0.113.5","events":[{"type":"login","name":"login_success"}]},
+			{"id":{"time":"2026-07-16T11:00:00Z","applicationName":"drive"},"actor":{"email":"ada@example.com"},"events":[{"type":"access","name":"download","parameters":[
+				{"name":"doc_title","value":"Q3 Board Deck"},
+				{"name":"doc_id","value":"1a2b3c"},
+				{"name":"owner_is_shared_drive","boolValue":false},
+				{"name":"visibility_change","multiValue":["external","shared_externally"]},
+				{"name":"billable","intValue":"42"},
+				{"name":"empty_param"}
+			]}]}
 		],"nextPageToken":"aNext"}`)
 	})
 
@@ -61,8 +69,8 @@ func TestAuditActivities(t *testing.T) {
 		"application": "login",
 		"startTime":   "2026-07-01T00:00:00Z",
 	})
-	if out["count"] != float64(1) {
-		t.Errorf("count = %v, want 1", out["count"])
+	if out["count"] != float64(2) {
+		t.Errorf("count = %v, want 2", out["count"])
 	}
 	acts := out["activities"].([]any)
 	first := acts[0].(map[string]any)
@@ -76,6 +84,56 @@ func TestAuditActivities(t *testing.T) {
 	}
 	if !strings.Contains(cap.activityQ, "startTime=2026-07-01") {
 		t.Errorf("query = %q, want startTime", cap.activityQ)
+	}
+}
+
+// TestAuditActivitiesReturnsEventParameters is the regression test for an audit
+// tool that could report what KIND of thing happened but never what it happened
+// TO: the fields projection dropped events.parameters, so a Drive row said
+// "download" with no document and an admin row had no target. Google returns the
+// value in one of four typed fields, all of which must be flattened.
+func TestAuditActivitiesReturnsEventParameters(t *testing.T) {
+	srv, cap := mockGovernance(t)
+	cs := connectGovernance(t, srv)
+
+	_, out := callTool(t, cs, "audit_activities", map[string]any{"application": "drive"})
+
+	cap.mu.Lock()
+	q := cap.activityQ
+	cap.mu.Unlock()
+	if !strings.Contains(q, "parameters") {
+		t.Errorf("fields projection does not request event parameters: %q", q)
+	}
+
+	acts := out["activities"].([]any)
+	if len(acts) < 2 {
+		t.Fatalf("want 2 activities, got %d", len(acts))
+	}
+	events := acts[1].(map[string]any)["events"].([]any)
+	params, ok := events[0].(map[string]any)["parameters"].([]any)
+	if !ok || len(params) == 0 {
+		t.Fatalf("download event carries no parameters: %v", events[0])
+	}
+	got := map[string]string{}
+	for _, p := range params {
+		m := p.(map[string]any)
+		name, _ := m["name"].(string)
+		value, _ := m["value"].(string)
+		got[name] = value
+	}
+	for name, want := range map[string]string{
+		"doc_title":             "Q3 Board Deck",               // string value
+		"doc_id":                "1a2b3c",                      // string value
+		"owner_is_shared_drive": "false",                       // boolValue
+		"visibility_change":     "external, shared_externally", // multiValue
+		"billable":              "42",                          // intValue (string-encoded int64)
+	} {
+		if got[name] != want {
+			t.Errorf("parameter %q = %q, want %q", name, got[name], want)
+		}
+	}
+	if _, present := got["empty_param"]; present {
+		t.Error("a parameter with no value should be omitted, not reported as empty")
 	}
 }
 
