@@ -62,6 +62,49 @@ func TestDWDImpersonatesPerUserAndCaches(t *testing.T) {
 	}
 }
 
+// TestDWDSourceOutlivesRequestContext is the regression test for the
+// refresh-context bug on the resource-server path: the per-user token source is
+// cached for the process lifetime, so the context it captures must not be the
+// tool call's request context — the go-sdk cancels that when the call returns,
+// which would fail every later refresh for that user. The captured context must
+// still carry the request's values (the impersonation target).
+func TestDWDSourceOutlivesRequestContext(t *testing.T) {
+	var captured context.Context
+	var calls int32
+	d := &DWD{
+		newSource: func(ctx context.Context, subject string) (oauth2.TokenSource, error) {
+			captured = ctx
+			return countingSource{token: "token-for-" + subject, calls: &calls}, nil
+		},
+		sources: make(map[string]oauth2.TokenSource),
+	}
+
+	reqCtx, cancel := context.WithCancel(WithUser(context.Background(), "ada@example.com"))
+	if _, err := d.GoogleToken(reqCtx); err != nil {
+		t.Fatalf("GoogleToken: %v", err)
+	}
+
+	// The MCP SDK cancels the request context when the tool call returns.
+	cancel()
+
+	if captured == nil {
+		t.Fatal("newSource was not called")
+	}
+	if err := captured.Err(); err != nil {
+		t.Errorf("captured context is cancelled after the request ended (%v); "+
+			"every later token refresh for this user would fail", err)
+	}
+	select {
+	case <-captured.Done():
+		t.Error("captured context is Done after the request ended")
+	default:
+	}
+	// WithoutCancel keeps values: the impersonation target must survive.
+	if u, ok := UserFromContext(captured); !ok || u != "ada@example.com" {
+		t.Errorf("captured context lost its user value: %q, %v", u, ok)
+	}
+}
+
 func TestDWDRequiresUserOnContext(t *testing.T) {
 	d := &DWD{
 		newSource: func(context.Context, string) (oauth2.TokenSource, error) {

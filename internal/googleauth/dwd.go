@@ -110,7 +110,14 @@ func (d *DWD) GoogleToken(ctx context.Context) (string, error) {
 	d.mu.Lock()
 	src := d.sources[user]
 	if src == nil {
-		s, err := d.newSource(ctx, user)
+		// The context handed to newSource is captured by the resulting token
+		// source and reused for every future mint/refresh for this user. It MUST
+		// NOT be this (request-scoped) call's context: the go-sdk cancels the tool
+		// handler's context when the call returns, so a captured request context
+		// would fail every refresh once the first assertion expires (~1h) — for
+		// every caller, until restart. WithoutCancel keeps any values but never
+		// cancels or expires. Same reasoning as Personal.GoogleToken.
+		s, err := d.newSource(context.WithoutCancel(ctx), user)
 		if err != nil {
 			d.mu.Unlock()
 			return "", err

@@ -6,6 +6,22 @@ by milestone.
 
 ## [Unreleased]
 
+### Fixed / Security (post-M9 review, second pass)
+
+A follow-up review (MCP-spec compliance, tool-surface design, and the Google
+API call shapes) on top of the first pass below.
+
+- **(High) Resource-server token refresh no longer dies after ~1h.** The same
+  captured-request-context bug fixed below for classic-delegated mode was still
+  live on the DWD path: `GoogleToken` cached each user's token source built from
+  that user's *first* request context, which the MCP SDK cancels when the call
+  returns. Every later mint/refresh for that user then failed with
+  `context canceled` — for every caller, until restart. It now builds the source
+  from `context.WithoutCancel(ctx)`, which keeps the request's values (the
+  impersonation target) but never cancels. Regression-tested by cancelling the
+  first request's context and asserting the captured context stays live and
+  keeps its user value.
+
 ### Fixed / Security (post-M9 review)
 
 A security- and correctness-focused review of the auth path (independently plus
