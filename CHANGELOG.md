@@ -11,6 +11,52 @@ by milestone.
 A follow-up review (MCP-spec compliance, tool-surface design, and the Google
 API call shapes) on top of the first pass below.
 
+Note on names: the tool rename described further down is applied throughout this
+file, including the milestone entries, so every name here is one that actually
+ships. Nothing has been released, so no published name changed.
+
+Dependency: `github.com/google/jsonschema-go` moves from indirect to direct. It
+was already in the build (the MCP SDK infers tool schemas with it); the enum
+constraints below call it explicitly rather than hand-writing schemas that could
+drift from the Go structs. No new module enters the graph.
+
+- **(Breaking) Tool names follow one scheme: `<service>_<verb>[_<object>]`.**
+  Three conventions had grown side by side — bare `list_messages`, service-first
+  `tasks_create`, and noun-first `directory_users_search` — and the Gmail,
+  Calendar and Drive reads carried no service prefix at all, so `get_profile` and
+  `get_event` were ambiguous the moment a second MCP server was connected. Every
+  tool is now prefixed by its service (`gmail_`, `calendar_`, `drive_`,
+  `directory_`, `admin_` for the Reports/Licensing governance reads, `tasks_`,
+  `people_`, `chat_`, `meet_`, `app_`), with the verb next; `health` stays as-is,
+  being about the server rather than a service. Safe to do now only because
+  nothing has been released — the cost of this rename rises the day it is.
+- **(Breaking) `search_messages` is removed.** It was `list_messages` with the
+  query made required — the same call, the same code path — so it added a
+  second plausible answer to "which tool searches mail" and nothing else.
+  `gmail_list_messages` takes an optional query and now says so plainly.
+- **(Medium) Enum-shaped inputs are constrained in the schema.** `format`,
+  `role`, `type`, `response`, `orderBy`, and the audit `application` listed their
+  permitted values only in prose, which a client cannot check: a wrong value
+  travelled to Google and came back as a 400, or was silently ignored. They now
+  carry a JSON Schema `enum`, so the mistake is caught before the call. The
+  schema is still inferred from the Go struct — only the constraint is added, so
+  it cannot drift from the type.
+- **(Medium) An over-cap Google response is an error, not a silent truncation.**
+  The 8 MiB read limit cut the body mid-JSON, surfacing as "unexpected end of
+  JSON input" — an error pointing at the wrong problem — and would have handed a
+  media caller a prefix indistinguishable from the whole file. It now fails with
+  a message naming the limit and how to narrow the request.
+- **(Medium) The eight tools that had no behavioral test now have one.**
+  `gmail_reply` (threading headers and `threadId`), `calendar_update_event`,
+  `directory_update_user`, `tasks_complete`, and the four `app_*` tools were
+  covered only by annotation assertions, so a wrong path, a missing impersonation
+  target, or a malformed body would have shipped green. Main-package coverage
+  73.9% → 79.2%.
+- **(Low) Supply chain: GitHub Actions are pinned to commit SHAs**, since a tag
+  is mutable and the release job holds `contents: write` and publishes the
+  binaries users download. The Docker build image stays tag-pinned on purpose —
+  it supplies the CA bundle and toolchain, and with no bot to bump a digest,
+  freezing one would ship stale roots.
 - **(Medium) Tool errors keep Google's status and reason.** `toolError` reduced a
   failure to its bare message, so 403-insufficient-scope, 404, 401-expired and a
   survived-retries 429 all read alike and a caller could not tell which recovery
@@ -28,7 +74,7 @@ API call shapes) on top of the first pass below.
 - **(Medium) Pagination is consistent across every list tool.**
   `tasks_list_tasklists` hardcoded 100 results and dropped `nextPageToken`,
   silently truncating longer lists; `chat_list_spaces` hardcoded 100 with no
-  caller control; `list_calendars` auto-followed every page. All three now take
+  caller control; `calendar_list_calendars` auto-followed every page. All three now take
   `maxResults`/`pageSize` and surface `nextPageToken` like the rest. With its last
   caller gone, `gapi.Client.List` — the follow-every-page helper — is removed
   rather than left as an invitation to reintroduce unbounded dumps.
@@ -67,8 +113,8 @@ API call shapes) on top of the first pass below.
 - **(High, spec compliance) Every tool now declares MCP tool annotations.** All
   60 tools shipped with none, and the spec's default for an unannotated tool is
   read-write, destructive, non-idempotent, and open-world — so a client (or a
-  policy layer in front of one) had to treat `list_messages` exactly like
-  `directory_user_suspend`. Each tool now declares `readOnlyHint`,
+  policy layer in front of one) had to treat `gmail_list_messages` exactly like
+  `directory_suspend_user`. Each tool now declares `readOnlyHint`,
   `destructiveHint`, `idempotentHint`, and `openWorldHint` from a small shared
   vocabulary (`readAnnotations` / `additiveAnnotations` /
   `destructiveAnnotations` / `localAnnotations` in `tools.go`): 35 read-only, 25
@@ -78,7 +124,7 @@ API call shapes) on top of the first pass below.
   `docs/capabilities.md` now spells out for policy-layer consumers. Contract
   tests assert every tool is annotated, that no read-only tool claims
   destructiveness, and pin the classification of the 23 mutations by name.
-- **(High) `respond_to_event` no longer removes the other attendees.** Calendar's
+- **(High) `calendar_respond_to_event` no longer removes the other attendees.** Calendar's
   PATCH overwrites array fields wholesale rather than merging them (a code
   comment asserted the opposite), so an RSVP that sent only the responding
   attendee replaced the event's attendee list with that one entry — everyone else
@@ -89,7 +135,7 @@ API call shapes) on top of the first pass below.
   keep the dry-run contract exact, `writePlan` gained `Prepare`, which builds a
   body at apply time only — a closed gate still makes no Google call of any kind,
   including this read.
-- **(High) `get_file_content` actually rejects binaries now.** Its description
+- **(High) `drive_get_file_content` actually rejects binaries now.** Its description
   promised "binary files without a text form are rejected", but only Google-native
   types were refused: a PDF, PNG, or zip was downloaded and returned as a string
   of replacement characters, spending the caller's context to say nothing. Files
@@ -104,7 +150,7 @@ API call shapes) on top of the first pass below.
   is parsed by delimiter rather than by length (a comment claimed length made it
   safe), so caller-supplied content containing that string split the body into
   bogus parts. Each upload now uses a fresh 128-bit random boundary.
-- **(Medium) `gmail_modify` path-escapes its message id**, the one place in the
+- **(Medium) `gmail_modify_labels` path-escapes its message id**, the one place in the
   tool surface that interpolated a caller-supplied id into a URL path unescaped.
 - **(Medium) Three Google API quirks that returned quietly misleading data.**
   `chat_list_messages` sent no `orderBy`, and Chat defaults to `createTime ASC`,
@@ -112,12 +158,12 @@ API call shapes) on top of the first pass below.
   happening in a channel read the beginning of its history; it now orders newest
   first. `tasks_list` with `showCompleted` omitted tasks completed through the
   Google Tasks UI, because completion also marks a task hidden and `showHidden`
-  is a separate flag; both are now sent together. `audit_activities` projected
+  is a separate flag; both are now sent together. `admin_list_audit_activities` projected
   away `events.parameters`, so a Drive row said "download" with no document and
   an admin row had no target — the audit tool could report what kind of thing
   happened but never what it happened to. Parameters are now requested and
   flattened from Google's four typed value fields into plain name/value pairs.
-- **(Medium) `get_message` no longer reports HTML-only mail as empty.** Body
+- **(Medium) `gmail_get_message` no longer reports HTML-only mail as empty.** Body
   extraction took the first `text/plain` part and stopped, so a message shipping
   HTML only — most commercial and newsletter mail — came back with `body: ""` and
   no explanation, which reads as "this email is empty" rather than "this reader
@@ -237,7 +283,7 @@ yet addressed.
   `gmail_list_send_as`. Tasks: `tasks_list_tasklists`, `tasks_list`,
   `tasks_create` (🟡), `tasks_complete` (🟡). People: `people_search_contacts`.
   Chat (Workspace-only): `chat_list_spaces`, `chat_list_messages`,
-  `chat_send_message` (🔴). `meet_conference_records` (edition-gated, errors
+  `chat_send_message` (🔴). `meet_list_conference_records` (edition-gated, errors
   cleanly). `drive_shared_with_me`. Client gains `Put` (and a PUT case in
   `runWrite`) plus `BaseTasks`/`BasePeople`/`BaseChat`/`BaseMeet`. Scopes are
   requested only under `--powerful`: `gmail.settings.basic`, `tasks.readonly`
@@ -249,16 +295,16 @@ yet addressed.
   No new dependencies.
 
 - **M6 — governance (audit, connected-app & license reads; Directory writes).**
-  Three read tools (register under `--admin`): `audit_activities` (Reports API
+  Three read tools (register under `--admin`): `admin_list_audit_activities` (Reports API
   activity log for login/admin/drive/token/… with time/actor/IP, RFC3339 bounds
-  validated, edition-gated apps erroring cleanly), `user_connected_apps`
+  validated, edition-gated apps erroring cleanly), `admin_list_connected_apps`
   (Directory `tokens.list` — the connected-app/consent audit with granted
-  scopes), and `license_assignments` (Enterprise License Manager, per
+  scopes), and `admin_list_license_assignments` (Enterprise License Manager, per
   product/SKU). Six write tools (register under `--admin`, ride the write gate):
-  `directory_user_create` (password **redacted** in preview via PreviewBody while
-  ApplyBody carries the real value), `directory_user_update`,
-  `directory_user_suspend`, `directory_group_create`,
-  `directory_group_add_member`, `directory_group_remove_member`. Scopes:
+  `directory_create_user` (password **redacted** in preview via PreviewBody while
+  ApplyBody carries the real value), `directory_update_user`,
+  `directory_suspend_user`, `directory_create_group`,
+  `directory_add_group_member`, `directory_remove_group_member`. Scopes:
   `admin.reports.audit.readonly`, `admin.directory.user.security`,
   `apps.licensing` added under `--admin`; the read-write directory scopes
   (`admin.directory.user`/`group`/`group.member`) only under `--admin` AND
@@ -297,9 +343,9 @@ yet addressed.
   in PLAN.md; hand-rolling JWT/JWKS crypto is inadvisable. docs/auth.md added.
 
 - **M4 — Directory reads (Admin SDK).** Six read-only Directory tools:
-  `directory_users_search`, `directory_user_get`, `directory_groups_search`,
-  `directory_group_members`, `directory_roles_list`, and
-  `directory_role_assignments`, all against `customer=my_customer` with `fields`
+  `directory_search_users`, `directory_get_user`, `directory_search_groups`,
+  `directory_list_group_members`, `directory_list_roles`, and
+  `directory_list_role_assignments`, all against `customer=my_customer` with `fields`
   projection and `nextPageToken` paging. Registered only behind a new `--admin`
   switch (`GWS_MCP_ADMIN`) — a registration switch, not a gate — which also adds
   the `admin.directory.{user,group,group.member,rolemanagement}.readonly`
@@ -320,11 +366,11 @@ yet addressed.
   *correct* gate (write vs send) for the plan, and an `ApplyBody` field lets a
   tool show a readable preview while sending a different wire form (Gmail's
   base64url raw MIME). Eleven gated tools: Gmail `gmail_create_draft`/
-  `gmail_modify` (🟡) and `gmail_send`/`gmail_reply` (🔴, RFC 2822 MIME built
-  and base64url-encoded); Calendar `create_appointment` (🟡, no attendees) vs
-  `create_event_with_attendees`/`update_event`/`cancel_event`/`respond_to_event`
+  `gmail_modify_labels` (🟡) and `gmail_send`/`gmail_reply` (🔴, RFC 2822 MIME built
+  and base64url-encoded); Calendar `calendar_create_appointment` (🟡, no attendees) vs
+  `calendar_create_event_with_attendees`/`calendar_update_event`/`calendar_cancel_event`/`calendar_respond_to_event`
   (🔴, `sendUpdates=all`) — the attendee split is the gate split; Drive
-  `upload_file` (🟡, multipart) and `share_file` (🔴, permission grant = egress).
+  `drive_upload_file` (🟡, multipart) and `drive_share_file` (🔴, permission grant = egress).
   Client gains `Patch`, `Delete`, `PostRaw` (custom Content-Type via a
   refactored `doRaw`), a query param on `Post`, and `BaseDriveUpload`. Scopes
   become gate-aware: `gmail.modify`/`calendar.events`/`drive` only when
@@ -334,15 +380,15 @@ yet addressed.
   ApplyBody wire-form substitution, MIME round-trip, and every tool's
   apply/dry-run/validation paths. No new dependencies.
 
-- **M2 — Calendar + Drive reads.** Four Calendar tools (`list_calendars`,
-  `list_events`, `get_event`, `freebusy_query`) and two Drive tools
-  (`list_files`, `get_file_content`), all acting as the signed-in user. Events
+- **M2 — Calendar + Drive reads.** Four Calendar tools (`calendar_list_calendars`,
+  `calendar_list_events`, `calendar_get_event`, `calendar_freebusy`) and two Drive tools
+  (`drive_list_files`, `drive_get_file_content`), all acting as the signed-in user. Events
   are windowed (RFC3339 bounds, blank defaults to now / +30 days, malformed
   rejected), expanded with `singleEvents=true` and ordered by start time, one
-  bounded page with `nextPageToken`. `freebusy_query` returns availability
-  without event details. `list_files` takes Drive's search syntax (recent-first
+  bounded page with `nextPageToken`. `calendar_freebusy` returns availability
+  without event details. `drive_list_files` takes Drive's search syntax (recent-first
   default), excludes trash by default, and can span shared drives;
-  `get_file_content` exports Google Docs/Sheets/Slides to text/CSV, downloads
+  `drive_get_file_content` exports Google Docs/Sheets/Slides to text/CSV, downloads
   other files directly, rejects text-less binaries, and caps output at 200 KiB.
   Client gains `Post` (JSON body → raw JSON, backing the free/busy read and
   future mutations) and `GetRaw` (raw bytes + Content-Type, backing Drive
@@ -361,8 +407,8 @@ yet addressed.
   for tests), `nextPageToken` paging with a per-API items-field, `fields`
   projection, Google error-envelope decoding, and central backoff on 429/503
   and rate-limit 403s honoring `Retry-After`. Five Gmail read tools (act as the
-  signed-in user against `/users/me`): `get_profile`, `list_labels`,
-  `list_messages`, `search_messages` (Gmail `q` syntax), and `get_message`
+  signed-in user against `/users/me`): `gmail_get_profile`, `gmail_list_labels`,
+  `gmail_list_messages`, `search_messages` (Gmail `q` syntax), and `gmail_get_message`
   (`metadata`/`full`, decoded plain-text body capped at 100 KiB, thread ids
   surfaced). Config gains `RequirePersonal` and the `GWS_CLIENT_ID` /
   `GWS_CLIENT_SECRET` variables; capabilities doc added. Tests use recording

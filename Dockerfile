@@ -1,4 +1,11 @@
 # Build a fully static binary, then ship it on scratch.
+#
+# Pinned by tag rather than digest, deliberately: this image supplies both the Go
+# toolchain and the CA bundle copied into the runtime image, and with no bot to
+# bump a digest here, freezing one would mean silently shipping stale roots and
+# an unpatched toolchain. Reproducible builds come from -trimpath plus the
+# checked-in go.sum. (The GitHub Actions below ARE digest-pinned — those run with
+# write access, so a mutable tag there is a different class of risk.)
 FROM golang:1.25 AS build
 
 WORKDIR /src

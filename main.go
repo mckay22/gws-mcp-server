@@ -1,9 +1,10 @@
 // Command gws-mcp-server exposes Google Workspace over the Model Context
 // Protocol. The MCP protocol owns stdout, so every diagnostic goes to stderr.
 //
-// M0 serves stdio in classic-delegated mode: you sign in with your own Google
-// account and the server acts as you (the sign-in itself lands in M1). The
-// resource-server HTTP transport and the powerful tiers are later milestones.
+// Two transports: stdio in classic-delegated mode (you sign in with your own
+// Google account and the server acts as you), and streamable HTTP in
+// resource-server mode (every request carries a bearer token this server validates,
+// and it acts as the mapped caller through domain-wide delegation).
 package main
 
 import (
@@ -222,8 +223,8 @@ type healthInput struct{}
 type healthOutput struct {
 	Server    string          `json:"server" jsonschema:"the MCP server name"`
 	Version   string          `json:"version" jsonschema:"the running server version"`
-	Transport string          `json:"transport" jsonschema:"the active transport (stdio)"`
-	Mode      string          `json:"mode" jsonschema:"the operating mode (classic-delegated)"`
+	Transport string          `json:"transport" jsonschema:"the active transport: stdio or http"`
+	Mode      string          `json:"mode" jsonschema:"the operating mode: classic-delegated or resource-server"`
 	Writes    bool            `json:"writes" jsonschema:"whether the write tools are enabled (else they dry-run)"`
 	Sends     bool            `json:"sends" jsonschema:"whether send-class tools are enabled (else they dry-run)"`
 	Admin     bool            `json:"admin" jsonschema:"whether the Admin SDK Directory/governance tools are registered"`

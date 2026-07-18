@@ -56,7 +56,7 @@ func TestDirectoryUserCreateRedactsPasswordInPreview(t *testing.T) {
 	srv, cap := mockDirectoryWrite(t)
 	cs := connectDirectoryWrite(t, srv, false) // write gate closed → dry-run
 
-	res, out := callTool(t, cs, "directory_user_create", map[string]any{
+	res, out := callTool(t, cs, "directory_create_user", map[string]any{
 		"primaryEmail": "new@example.com",
 		"givenName":    "New",
 		"familyName":   "User",
@@ -83,7 +83,7 @@ func TestDirectoryUserCreateAppliesRealPassword(t *testing.T) {
 	srv, cap := mockDirectoryWrite(t)
 	cs := connectDirectoryWrite(t, srv, true) // write gate open
 
-	res, out := callTool(t, cs, "directory_user_create", map[string]any{
+	res, out := callTool(t, cs, "directory_create_user", map[string]any{
 		"primaryEmail": "new@example.com",
 		"givenName":    "New",
 		"familyName":   "User",
@@ -109,7 +109,7 @@ func TestDirectoryUserSuspend(t *testing.T) {
 	srv, cap := mockDirectoryWrite(t)
 	cs := connectDirectoryWrite(t, srv, true)
 
-	_, out := callTool(t, cs, "directory_user_suspend", map[string]any{
+	_, out := callTool(t, cs, "directory_suspend_user", map[string]any{
 		"userKey": "ada@example.com",
 		"suspend": true,
 	})
@@ -127,7 +127,7 @@ func TestDirectoryGroupAddMemberValidatesRole(t *testing.T) {
 	srv, _ := mockDirectoryWrite(t)
 	cs := connectDirectoryWrite(t, srv, true)
 
-	msg := callToolErr(t, cs, "directory_group_add_member", map[string]any{
+	msg := callToolErr(t, cs, "directory_add_group_member", map[string]any{
 		"groupKey": "eng@example.com",
 		"email":    "ada@example.com",
 		"role":     "SUPERUSER",
@@ -141,7 +141,7 @@ func TestDirectoryGroupRemoveMember(t *testing.T) {
 	srv, cap := mockDirectoryWrite(t)
 	cs := connectDirectoryWrite(t, srv, true)
 
-	_, out := callTool(t, cs, "directory_group_remove_member", map[string]any{
+	_, out := callTool(t, cs, "directory_remove_group_member", map[string]any{
 		"groupKey":  "eng@example.com",
 		"memberKey": "ada@example.com",
 	})
@@ -162,11 +162,57 @@ func TestDirectoryWritesRideWriteGate(t *testing.T) {
 	srv, cap := mockDirectoryWrite(t)
 	cs := connectDirectoryWrite(t, srv, false) // gate closed
 
-	_, out := callTool(t, cs, "directory_group_create", map[string]any{"email": "new@example.com"})
+	_, out := callTool(t, cs, "directory_create_group", map[string]any{"email": "new@example.com"})
 	if out["dryRun"] != true {
 		t.Errorf("directory write must dry-run with the write gate closed: %v", out)
 	}
 	if cap.called {
 		t.Error("must not call the API when the write gate is closed")
+	}
+}
+
+// directory_update_user had no behavioral test: it must PATCH the named user and
+// send only the fields the caller supplied, since a Directory PATCH overwrites
+// what it receives.
+func TestDirectoryUpdateUserPatchesNamedFields(t *testing.T) {
+	srv, cap := mockDirectoryWrite(t)
+
+	// Gate closed → dry run, no call.
+	cs := connectDirectoryWrite(t, srv, false)
+	_, out := callTool(t, cs, "directory_update_user", map[string]any{
+		"userKey":   "ada@example.com",
+		"givenName": "Augusta",
+	})
+	if out["dryRun"] != true {
+		t.Errorf("expected a dry run: %v", out)
+	}
+	if cap.called {
+		t.Error("dry run wrote to the directory")
+	}
+
+	// Gate open → applied.
+	cs2 := connectDirectoryWrite(t, srv, true)
+	_, out2 := callTool(t, cs2, "directory_update_user", map[string]any{
+		"userKey":     "ada@example.com",
+		"givenName":   "Augusta",
+		"orgUnitPath": "/Engineering",
+	})
+	if out2["applied"] != true {
+		t.Errorf("expected applied, got %v", out2)
+	}
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	if cap.method != http.MethodPatch {
+		t.Errorf("method = %q, want PATCH", cap.method)
+	}
+	if cap.path != "/admin/directory/v1/users/ada@example.com" {
+		t.Errorf("path = %q", cap.path)
+	}
+	if !strings.Contains(cap.body, "Augusta") || !strings.Contains(cap.body, "/Engineering") {
+		t.Errorf("body = %q, want the named fields", cap.body)
+	}
+	// A field the caller did not name must not be sent; PATCH would overwrite it.
+	if strings.Contains(cap.body, "familyName") {
+		t.Errorf("body = %q, must not send unnamed fields", cap.body)
 	}
 }

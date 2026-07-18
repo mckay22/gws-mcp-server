@@ -168,7 +168,7 @@ func TestGetProfile(t *testing.T) {
 	srv, _ := mockGmail(t)
 	cs := connectGmail(t, srv)
 
-	_, out := callTool(t, cs, "get_profile", map[string]any{})
+	_, out := callTool(t, cs, "gmail_get_profile", map[string]any{})
 	if out["emailAddress"] != "ada@example.com" {
 		t.Errorf("emailAddress = %v", out["emailAddress"])
 	}
@@ -181,7 +181,7 @@ func TestListLabels(t *testing.T) {
 	srv, _ := mockGmail(t)
 	cs := connectGmail(t, srv)
 
-	_, out := callTool(t, cs, "list_labels", map[string]any{})
+	_, out := callTool(t, cs, "gmail_list_labels", map[string]any{})
 	if out["count"] != float64(3) {
 		t.Errorf("count = %v, want 3", out["count"])
 	}
@@ -199,7 +199,7 @@ func TestListMessagesWiresQuery(t *testing.T) {
 	srv, cap := mockGmail(t)
 	cs := connectGmail(t, srv)
 
-	_, out := callTool(t, cs, "list_messages", map[string]any{
+	_, out := callTool(t, cs, "gmail_list_messages", map[string]any{
 		"query":      "from:alice is:unread",
 		"labelIds":   []any{"INBOX", "UNREAD"},
 		"maxResults": float64(10),
@@ -229,7 +229,7 @@ func TestListMessagesClampsMaxResults(t *testing.T) {
 	cs := connectGmail(t, srv)
 
 	// Over the cap → clamped to maxLimit; zero would default, so test the cap.
-	callTool(t, cs, "list_messages", map[string]any{"maxResults": float64(9999)})
+	callTool(t, cs, "gmail_list_messages", map[string]any{"maxResults": float64(9999)})
 	cap.mu.Lock()
 	defer cap.mu.Unlock()
 	if cap.maxResults != fmt.Sprint(maxLimit) {
@@ -237,21 +237,11 @@ func TestListMessagesClampsMaxResults(t *testing.T) {
 	}
 }
 
-func TestSearchMessagesRequiresQuery(t *testing.T) {
-	srv, _ := mockGmail(t)
-	cs := connectGmail(t, srv)
-
-	msg := callToolErr(t, cs, "search_messages", map[string]any{"query": "   "})
-	if !strings.Contains(msg, "query is required") {
-		t.Errorf("error = %q, want 'query is required'", msg)
-	}
-}
-
 func TestGetMessageMetadata(t *testing.T) {
 	srv, cap := mockGmail(t)
 	cs := connectGmail(t, srv)
 
-	_, out := callTool(t, cs, "get_message", map[string]any{"id": "m1"})
+	_, out := callTool(t, cs, "gmail_get_message", map[string]any{"id": "m1"})
 	if out["from"] != "Ada Lovelace <ada@example.com>" {
 		t.Errorf("from = %v", out["from"])
 	}
@@ -273,7 +263,7 @@ func TestGetMessageFullDecodesBody(t *testing.T) {
 	srv, cap := mockGmail(t)
 	cs := connectGmail(t, srv)
 
-	_, out := callTool(t, cs, "get_message", map[string]any{"id": "m1", "format": "full"})
+	_, out := callTool(t, cs, "gmail_get_message", map[string]any{"id": "m1", "format": "full"})
 	if out["body"] != bodyText {
 		t.Errorf("body = %q, want %q", out["body"], bodyText)
 	}
@@ -291,9 +281,12 @@ func TestGetMessageValidatesFormat(t *testing.T) {
 	srv, _ := mockGmail(t)
 	cs := connectGmail(t, srv)
 
-	msg := callToolErr(t, cs, "get_message", map[string]any{"id": "m1", "format": "bogus"})
-	if !strings.Contains(msg, "format must be") {
-		t.Errorf("error = %q, want format validation message", msg)
+	msg := callToolErr(t, cs, "gmail_get_message", map[string]any{"id": "m1", "format": "bogus"})
+	// The schema enum rejects it before the handler runs, naming the valid formats.
+	for _, want := range []string{"format", "metadata", "full"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error = %q, want it to mention %q", msg, want)
+		}
 	}
 }
 
@@ -301,7 +294,7 @@ func TestGetMessageNotFound(t *testing.T) {
 	srv, _ := mockGmail(t)
 	cs := connectGmail(t, srv)
 
-	msg := callToolErr(t, cs, "get_message", map[string]any{"id": "missing"})
+	msg := callToolErr(t, cs, "gmail_get_message", map[string]any{"id": "missing"})
 	if !strings.Contains(msg, "not found") && !strings.Contains(msg, "not be found") && !strings.Contains(msg, "Requested entity") {
 		t.Errorf("error = %q, want a not-found message", msg)
 	}
@@ -313,7 +306,7 @@ func TestGetMessageRequiresID(t *testing.T) {
 
 	// The SDK rejects an entirely-missing id via schema validation; a present but
 	// blank id is caught by the handler.
-	msg := callToolErr(t, cs, "get_message", map[string]any{"id": "   "})
+	msg := callToolErr(t, cs, "gmail_get_message", map[string]any{"id": "   "})
 	if !strings.Contains(msg, "id is required") {
 		t.Errorf("error = %q, want 'id is required'", msg)
 	}

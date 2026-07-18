@@ -60,9 +60,9 @@ type Attendee struct {
 	ResponseStatus string `json:"responseStatus,omitempty"`
 }
 
-// Event is the summarized calendar event returned by list_events/get_event. Its
+// Event is the summarized calendar event returned by calendar_list_events/calendar_get_event. Its
 // JSON tags double as the decode target for a Calendar event resource.
-// Description is populated only by get_event (list projection omits it).
+// Description is populated only by calendar_get_event (list projection omits it).
 type Event struct {
 	ID               string     `json:"id"`
 	Status           string     `json:"status,omitempty"`
@@ -80,7 +80,7 @@ type Event struct {
 	Updated          string     `json:"updated,omitempty"`
 }
 
-// --- list_calendars ---
+// --- calendar_list_calendars ---
 
 type listCalendarsInput struct {
 	MaxResults int    `json:"maxResults,omitempty" jsonschema:"page size 1-100 (default 25)"`
@@ -106,10 +106,10 @@ type listCalendarsOutput struct {
 
 func registerListCalendars(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_calendars",
+		Name:        "calendar_list_calendars",
 		Annotations: readAnnotations(),
 		Title:       "List calendars",
-		Description: "List the calendars on the signed-in user's calendar list, with their ids (use as calendarId in list_events/get_event), access role, and time zone. Page with nextPageToken.",
+		Description: "List the calendars on the signed-in user's calendar list, with their ids (use as calendarId in calendar_list_events/calendar_get_event), access role, and time zone. Page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listCalendarsInput) (*mcp.CallToolResult, listCalendarsOutput, error) {
 		// One bounded page plus a token, like every other list tool here. This used
 		// to auto-follow every page, so a user subscribed to hundreds of calendars
@@ -141,10 +141,10 @@ func registerListCalendars(server *mcp.Server, gc *gapi.Client) {
 	})
 }
 
-// --- list_events ---
+// --- calendar_list_events ---
 
 type listEventsInput struct {
-	CalendarID string `json:"calendarId,omitempty" jsonschema:"calendar id (default 'primary'); get ids from list_calendars"`
+	CalendarID string `json:"calendarId,omitempty" jsonschema:"calendar id (default 'primary'); get ids from calendar_list_calendars"`
 	TimeMin    string `json:"timeMin,omitempty" jsonschema:"window start, RFC3339 (default now)"`
 	TimeMax    string `json:"timeMax,omitempty" jsonschema:"window end, RFC3339 (default 30 days after timeMin)"`
 	Query      string `json:"query,omitempty" jsonschema:"free-text search over event fields"`
@@ -162,7 +162,7 @@ type listEventsOutput struct {
 
 func registerListEvents(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_events",
+		Name:        "calendar_list_events",
 		Annotations: readAnnotations(),
 		Title:       "List calendar events",
 		Description: "List events in a calendar within a time window, expanded to single instances and ordered by start time. Defaults to the primary calendar and the next 30 days. Returns one page; page with nextPageToken.",
@@ -176,7 +176,7 @@ func registerListEvents(server *mcp.Server, gc *gapi.Client) {
 }
 
 // listEventsFor lists a windowed, single-instance, start-ordered page of events
-// for a calendar. It is shared by list_events and app_list_events. Blank time
+// for a calendar. It is shared by calendar_list_events and app_list_events. Blank time
 // bounds default (now / +30 days); a malformed bound is an error.
 func listEventsFor(ctx context.Context, gc *gapi.Client, calendarID, timeMinIn, timeMaxIn, query string, maxResults int, pageToken string) (listEventsOutput, error) {
 	now := time.Now()
@@ -230,16 +230,16 @@ func listPrimaryEvents(ctx context.Context, gc *gapi.Client, timeMin, timeMax st
 	return listEventsFor(ctx, gc, "primary", timeMin, timeMax, "", maxResults, pageToken)
 }
 
-// --- get_event ---
+// --- calendar_get_event ---
 
 type getEventInput struct {
 	CalendarID string `json:"calendarId,omitempty" jsonschema:"calendar id (default 'primary')"`
-	EventID    string `json:"eventId" jsonschema:"the event id from list_events"`
+	EventID    string `json:"eventId" jsonschema:"the event id from calendar_list_events"`
 }
 
 func registerGetEvent(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_event",
+		Name:        "calendar_get_event",
 		Annotations: readAnnotations(),
 		Title:       "Get calendar event",
 		Description: "Fetch a single event by id (including its description and attendee RSVP states) from the given calendar (default 'primary').",
@@ -261,7 +261,7 @@ func registerGetEvent(server *mcp.Server, gc *gapi.Client) {
 	})
 }
 
-// --- freebusy_query ---
+// --- calendar_freebusy ---
 
 type freeBusyInput struct {
 	TimeMin     string   `json:"timeMin,omitempty" jsonschema:"window start, RFC3339 (default now)"`
@@ -293,7 +293,7 @@ type freeBusyOutput struct {
 
 func registerFreeBusy(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "freebusy_query",
+		Name:        "calendar_freebusy",
 		Annotations: readAnnotations(),
 		Title:       "Query free/busy",
 		Description: "Return busy time intervals for one or more calendars in a window (default the primary calendar, next 7 days) — the free/busy availability view, without event details.",

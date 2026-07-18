@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/mckay22/gws-mcp-server/internal/config"
@@ -89,11 +91,11 @@ func TestToolAnnotationsMatchBehavior(t *testing.T) {
 
 	readOnly := []string{
 		"health",
-		"get_profile", "list_messages", "get_message", "list_labels",
-		"list_events", "get_event", "freebusy_query",
-		"list_files", "get_file_content",
-		"directory_users_search", "directory_role_assignments",
-		"audit_activities", "user_connected_apps", "license_assignments",
+		"gmail_get_profile", "gmail_list_messages", "gmail_get_message", "gmail_list_labels",
+		"calendar_list_events", "calendar_get_event", "calendar_freebusy",
+		"drive_list_files", "drive_get_file_content",
+		"directory_search_users", "directory_list_role_assignments",
+		"admin_list_audit_activities", "admin_list_connected_apps", "admin_list_license_assignments",
 		"app_list_messages", "app_get_message", "app_list_files",
 	}
 	for _, name := range readOnly {
@@ -109,29 +111,29 @@ func TestToolAnnotationsMatchBehavior(t *testing.T) {
 
 	// Every mutation must be marked read-write; the destructive ones must say so.
 	mutating := map[string]bool{ // tool -> expected destructiveHint
-		"gmail_create_draft":            false,
-		"gmail_send":                    false, // additive: creates a message, destroys nothing
-		"gmail_reply":                   false,
-		"gmail_modify":                  true, // overwrites label state
-		"gmail_set_vacation":            true, // PUT replaces the whole resource
-		"create_event_with_attendees":   false,
-		"update_event":                  true,
-		"cancel_event":                  true,
-		"respond_to_event":              true,
-		"upload_file":                   false,
-		"share_file":                    false, // additive to the ACL
-		"directory_user_create":         false,
-		"directory_user_update":         true,
-		"directory_user_suspend":        true,
-		"directory_group_add_member":    false,
-		"directory_group_remove_member": true,
-		"tasks_create":                  false,
-		"tasks_complete":                true,
-		"chat_send_message":             false,
-		"app_send_mail":                 false,
-		"app_set_vacation":              true,
-		"app_bulk_user_suspend":         true,
-		"app_bulk_group_add_members":    false,
+		"gmail_create_draft":                   false,
+		"gmail_send":                           false, // additive: creates a message, destroys nothing
+		"gmail_reply":                          false,
+		"gmail_modify_labels":                  true, // overwrites label state
+		"gmail_set_vacation":                   true, // PUT replaces the whole resource
+		"calendar_create_event_with_attendees": false,
+		"calendar_update_event":                true,
+		"calendar_cancel_event":                true,
+		"calendar_respond_to_event":            true,
+		"drive_upload_file":                    false,
+		"drive_share_file":                     false, // additive to the ACL
+		"directory_create_user":                false,
+		"directory_update_user":                true,
+		"directory_suspend_user":               true,
+		"directory_add_group_member":           false,
+		"directory_remove_group_member":        true,
+		"tasks_create":                         false,
+		"tasks_complete":                       true,
+		"chat_send_message":                    false,
+		"app_send_mail":                        false,
+		"app_set_vacation":                     true,
+		"app_bulk_user_suspend":                true,
+		"app_bulk_group_add_members":           false,
 	}
 	for name, wantDestructive := range mutating {
 		tool, ok := tools[name]
@@ -171,6 +173,74 @@ func TestHealthIsClosedWorld(t *testing.T) {
 		}
 		if !*open {
 			t.Errorf("tool %q calls Google but is marked closed-world", name)
+		}
+	}
+}
+
+// TestEnumInputsAreConstrained checks the enum-shaped inputs advertise their
+// permitted values as a JSON Schema `enum`, not only in prose. Prose is not
+// machine-readable: a client cannot pre-validate against it, so a wrong value
+// reaches Google and comes back as a 400 (or gets silently ignored) instead of
+// being caught before the call.
+func TestEnumInputsAreConstrained(t *testing.T) {
+	tools := listAllTools(t)
+
+	want := map[string]map[string][]string{
+		"gmail_get_message":         {"format": {"metadata", "full"}},
+		"app_get_message":           {"format": {"metadata", "full"}},
+		"drive_share_file":          {"role": {"reader", "commenter", "writer"}, "type": {"user", "group", "domain", "anyone"}},
+		"calendar_respond_to_event": {"response": {"accepted", "declined", "tentative"}},
+		"directory_search_users":    {"orderBy": {"email", "givenName", "familyName"}},
+	}
+
+	for toolName, props := range want {
+		tool, ok := tools[toolName]
+		if !ok {
+			t.Errorf("expected tool %q to be registered", toolName)
+			continue
+		}
+		// The advertised schema is whatever a client receives, so assert on that
+		// rather than on the Go type it was inferred from.
+		raw, err := json.Marshal(tool.InputSchema)
+		if err != nil {
+			t.Errorf("%s: marshal input schema: %v", toolName, err)
+			continue
+		}
+		var schema struct {
+			Properties map[string]struct {
+				Enum []string `json:"enum"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Errorf("%s: decode input schema: %v", toolName, err)
+			continue
+		}
+		for prop, wantValues := range props {
+			got := schema.Properties[prop].Enum
+			if len(got) == 0 {
+				t.Errorf("%s.%s advertises no enum; a client cannot validate it before calling", toolName, prop)
+				continue
+			}
+			if strings.Join(got, ",") != strings.Join(wantValues, ",") {
+				t.Errorf("%s.%s enum = %v, want %v", toolName, prop, got, wantValues)
+			}
+		}
+	}
+
+	// admin_list_audit_activities is checked separately: the list is long and its exact
+	// membership is Google's, so only require that it is constrained and includes
+	// the applications the description names.
+	audit, ok := tools["admin_list_audit_activities"]
+	if !ok {
+		t.Fatal("admin_list_audit_activities not registered")
+	}
+	raw, _ := json.Marshal(audit.InputSchema)
+	if !strings.Contains(string(raw), `"enum"`) {
+		t.Error("admin_list_audit_activities.application advertises no enum")
+	}
+	for _, app := range []string{"login", "admin", "drive", "token"} {
+		if !strings.Contains(string(raw), `"`+app+`"`) {
+			t.Errorf("admin_list_audit_activities application enum omits %q, which its description advertises", app)
 		}
 	}
 }

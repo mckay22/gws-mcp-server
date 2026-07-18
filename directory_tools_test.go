@@ -85,7 +85,7 @@ func TestDirectoryUsersSearch(t *testing.T) {
 	srv, cap := mockDirectory(t)
 	cs := connectDirectory(t, srv)
 
-	_, out := callTool(t, cs, "directory_users_search", map[string]any{"query": "isAdmin=true"})
+	_, out := callTool(t, cs, "directory_search_users", map[string]any{"query": "isAdmin=true"})
 	if out["count"] != float64(2) {
 		t.Errorf("count = %v, want 2", out["count"])
 	}
@@ -106,7 +106,7 @@ func TestDirectoryUserGet(t *testing.T) {
 	srv, _ := mockDirectory(t)
 	cs := connectDirectory(t, srv)
 
-	_, out := callTool(t, cs, "directory_user_get", map[string]any{"userKey": "ada@example.com"})
+	_, out := callTool(t, cs, "directory_get_user", map[string]any{"userKey": "ada@example.com"})
 	if out["primaryEmail"] != "ada@example.com" {
 		t.Errorf("primaryEmail = %v", out["primaryEmail"])
 	}
@@ -120,7 +120,7 @@ func TestDirectoryUserGetNotFound(t *testing.T) {
 	srv, _ := mockDirectory(t)
 	cs := connectDirectory(t, srv)
 
-	msg := callToolErr(t, cs, "directory_user_get", map[string]any{"userKey": "missing@example.com"})
+	msg := callToolErr(t, cs, "directory_get_user", map[string]any{"userKey": "missing@example.com"})
 	if !strings.Contains(msg, "Not Found") {
 		t.Errorf("error = %q", msg)
 	}
@@ -130,7 +130,7 @@ func TestDirectoryGroupsSearchByUser(t *testing.T) {
 	srv, cap := mockDirectory(t)
 	cs := connectDirectory(t, srv)
 
-	_, out := callTool(t, cs, "directory_groups_search", map[string]any{"userKey": "ada@example.com"})
+	_, out := callTool(t, cs, "directory_search_groups", map[string]any{"userKey": "ada@example.com"})
 	if out["count"] != float64(1) {
 		t.Errorf("count = %v, want 1", out["count"])
 	}
@@ -145,7 +145,7 @@ func TestDirectoryGroupMembers(t *testing.T) {
 	srv, _ := mockDirectory(t)
 	cs := connectDirectory(t, srv)
 
-	_, out := callTool(t, cs, "directory_group_members", map[string]any{"groupKey": "eng@example.com"})
+	_, out := callTool(t, cs, "directory_list_group_members", map[string]any{"groupKey": "eng@example.com"})
 	if out["count"] != float64(2) {
 		t.Errorf("count = %v, want 2", out["count"])
 	}
@@ -160,7 +160,7 @@ func TestDirectoryRolesList(t *testing.T) {
 	srv, _ := mockDirectory(t)
 	cs := connectDirectory(t, srv)
 
-	_, out := callTool(t, cs, "directory_roles_list", map[string]any{})
+	_, out := callTool(t, cs, "directory_list_roles", map[string]any{})
 	if out["count"] != float64(2) {
 		t.Errorf("count = %v, want 2", out["count"])
 	}
@@ -175,7 +175,7 @@ func TestDirectoryRoleAssignments(t *testing.T) {
 	srv, _ := mockDirectory(t)
 	cs := connectDirectory(t, srv)
 
-	_, out := callTool(t, cs, "directory_role_assignments", map[string]any{"userKey": "1"})
+	_, out := callTool(t, cs, "directory_list_role_assignments", map[string]any{"userKey": "1"})
 	if out["count"] != float64(1) {
 		t.Errorf("count = %v, want 1", out["count"])
 	}

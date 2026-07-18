@@ -20,19 +20,19 @@ func registerDriveReadTools(server *mcp.Server, gc *gapi.Client) {
 	registerGetFileContent(server, gc)
 }
 
-// maxFileContentBytes caps how many bytes of file/export content get_file_content
+// maxFileContentBytes caps how many bytes of file/export content drive_get_file_content
 // returns, so a large document can't flood model context.
 const maxFileContentBytes = 200 << 10 // 200 KiB
 
 // fileListFields projects Drive file metadata down to what the tool surfaces.
 const fileListFields = "files(id,name,mimeType,modifiedTime,size,owners(emailAddress,displayName),webViewLink,parents,driveId,shared,trashed),nextPageToken,incompleteSearch"
 
-// fileMetaFields is the metadata get_file_content needs to decide export vs
+// fileMetaFields is the metadata drive_get_file_content needs to decide export vs
 // direct download.
 const fileMetaFields = "id,name,mimeType,size"
 
 // googleAppsExports maps the Google-native editor MIME types to the export MIME
-// type get_file_content requests (always a plain-text form to keep context
+// type drive_get_file_content requests (always a plain-text form to keep context
 // small). Files not in this map are downloaded directly via alt=media.
 var googleAppsExports = map[string]string{
 	"application/vnd.google-apps.document":     "text/plain",
@@ -40,7 +40,7 @@ var googleAppsExports = map[string]string{
 	"application/vnd.google-apps.presentation": "text/plain",
 }
 
-// --- list_files ---
+// --- drive_list_files ---
 
 type listFilesInput struct {
 	Query       string `json:"query,omitempty" jsonschema:"Drive search query (e.g. \"name contains 'report'\", \"mimeType='application/pdf'\", \"modifiedTime > '2026-01-01T00:00:00'\"); omit to list recent files"`
@@ -57,7 +57,7 @@ type DriveOwner struct {
 	DisplayName  string `json:"displayName,omitempty"`
 }
 
-// DriveFile is the compact file metadata returned by list_files.
+// DriveFile is the compact file metadata returned by drive_list_files.
 type DriveFile struct {
 	ID           string       `json:"id"`
 	Name         string       `json:"name"`
@@ -81,7 +81,7 @@ type listFilesOutput struct {
 
 func registerListFiles(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_files",
+		Name:        "drive_list_files",
 		Annotations: readAnnotations(),
 		Title:       "List/search Drive files",
 		Description: "List or search the signed-in user's Drive files. With no query, returns recent files (newest first). With a query, uses Drive's search syntax. Returns one page of metadata (no content); page with nextPageToken. Optionally spans shared drives.",
@@ -139,10 +139,10 @@ func registerListFiles(server *mcp.Server, gc *gapi.Client) {
 	})
 }
 
-// --- get_file_content ---
+// --- drive_get_file_content ---
 
 type getFileContentInput struct {
-	FileID string `json:"fileId" jsonschema:"the Drive file id from list_files"`
+	FileID string `json:"fileId" jsonschema:"the Drive file id from drive_list_files"`
 }
 
 type getFileContentOutput struct {
@@ -156,7 +156,7 @@ type getFileContentOutput struct {
 
 func registerGetFileContent(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_file_content",
+		Name:        "drive_get_file_content",
 		Annotations: readAnnotations(),
 		Title:       "Get Drive file content",
 		Description: "Fetch a file's text content by id. Google Docs/Sheets/Slides are exported (to plain text / CSV); other files are downloaded directly. Binary files without a text form are rejected. Content is capped at 200 KiB (truncated flag set when longer).",
@@ -197,7 +197,7 @@ func registerGetFileContent(server *mcp.Server, gc *gapi.Client) {
 			// would otherwise be handed back as a wall of replacement characters
 			// that costs context and tells the caller nothing.
 			return nil, getFileContentOutput{}, fmt.Errorf(
-				"file %q is %s, which has no text form — get_file_content returns text only", meta.Name, meta.MimeType)
+				"file %q is %s, which has no text form — drive_get_file_content returns text only", meta.Name, meta.MimeType)
 		} else {
 			body, _, err = gc.GetRaw(ctx, gapi.BaseDrive, "/files/"+url.PathEscape(fileID), url.Values{
 				"alt":               {"media"},

@@ -33,8 +33,9 @@ built to the same principles:
 > domain-wide delegation. See [docs/auth.md](docs/auth.md) for the identity model
 > and [docs/capabilities.md](docs/capabilities.md) for the tools. Behind
 > `--app-only`: an application tier whose `app_*` tools act on an explicit `user`
-> target via a separate service account, logging the requesting actor. Next:
-> packaging (Docker, quickstart).
+> target via a separate service account, logging the requesting actor. Every tool
+> declares MCP tool annotations (read-only / destructive / idempotent /
+> open-world), so a client or policy layer can judge a call before making it.
 
 ## Running (classic-delegated mode)
 
@@ -69,6 +70,15 @@ tools; they still honor the gates.
 | `GWS_CLIENT_SECRET` | The paired client secret. Never logged or returned |
 | `GWS_MCP_ALLOW_WRITES` | `true` opens the write gate (same as `--allow-writes`) |
 | `GWS_MCP_ALLOW_SENDS` | `true` opens the send gate (same as `--allow-sends`; independent of writes) |
+| `GWS_MCP_ADMIN` | `true` registers the Admin SDK Directory + governance tools (same as `--admin`) |
+| `GWS_MCP_POWERFUL` | `true` registers the powerful-delegated tools (same as `--powerful`) |
+| `GWS_MCP_APP_ONLY` | `true` registers the application tier (same as `--app-only`) |
+| `GWS_APP_SA_KEY` | Path to the application tier's OWN service-account key. Must differ from `GWS_DWD_SA_KEY` |
+| `GWS_APP_ADMIN_SUBJECT` | Admin the application tier impersonates for the bulk Directory tools |
+
+Resource-server mode adds `GWS_AUDIENCE`, `GWS_ISSUERS`, `GWS_DWD_SA_KEY`,
+`GWS_SUBJECT_CLAIM`, and `GWS_TRUST_UNVERIFIED_EMAIL` — see
+[docs/auth.md](docs/auth.md).
 
 ## Running (resource-server mode)
 

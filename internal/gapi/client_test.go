@@ -324,3 +324,30 @@ func TestNoRetryOnAuthz403(t *testing.T) {
 		t.Errorf("attempts = %d, want 1 (a genuine authz 403 must not be retried)", attempts)
 	}
 }
+
+// TestOversizeResponseFailsLoudly covers the read cap. Truncating at the limit
+// would hand a JSON caller a body cut mid-object — surfacing as "unexpected end
+// of JSON input", which points at the wrong problem — and would hand a media
+// caller a prefix indistinguishable from the whole file.
+func TestOversizeResponseFailsLoudly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Comfortably past the 8 MiB cap, and valid JSON so only the cap can fail it.
+		w.Write([]byte(`{"data":"` + strings.Repeat("x", 9<<20) + `"}`))
+	}))
+	defer srv.Close()
+
+	c := New(staticToken{token: "t"}, WithBaseURL(srv.URL))
+	_, err := c.Get(context.Background(), BaseGmail, "/users/me/profile", nil)
+	if err == nil {
+		t.Fatal("an over-cap response was accepted; the caller would see a truncated body")
+	}
+	for _, want := range []string{"exceeds", "limit"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %v, want it to mention %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "unexpected end of JSON") {
+		t.Errorf("cap surfaced as a parse error, which misdirects: %v", err)
+	}
+}

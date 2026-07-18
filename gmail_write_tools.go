@@ -124,7 +124,7 @@ func registerGmailCreateDraft(server *mcp.Server, gc *gapi.Client, allowWrites, 
 	})
 }
 
-// --- gmail_modify (write gate) ---
+// --- gmail_modify_labels (write gate) ---
 
 type gmailModifyInput struct {
 	ID             string   `json:"id" jsonschema:"the message id to modify"`
@@ -134,7 +134,7 @@ type gmailModifyInput struct {
 
 func registerGmailModify(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "gmail_modify",
+		Name:        "gmail_modify_labels",
 		Annotations: destructiveAnnotations(),
 		Title:       "Modify Gmail message labels",
 		Description: "Add and/or remove labels on a message (POST /users/me/messages/{id}/modify) — the mechanism behind read/unread (UNREAD label), archive (remove INBOX), star, and custom labels. Reversible, so it rides the write gate: without " + config.EnvAllowWrites + "=true it returns a dry-run preview.",
@@ -203,7 +203,7 @@ func registerGmailSend(server *mcp.Server, gc *gapi.Client, allowWrites, allowSe
 // --- gmail_reply (send gate) ---
 
 type gmailReplyInput struct {
-	ThreadID  string   `json:"threadId" jsonschema:"the thread id to reply within (from list_messages/get_message)"`
+	ThreadID  string   `json:"threadId" jsonschema:"the thread id to reply within (from gmail_list_messages/gmail_get_message)"`
 	To        []string `json:"to" jsonschema:"recipient email addresses (required)"`
 	Cc        []string `json:"cc,omitempty" jsonschema:"carbon-copy email addresses"`
 	Subject   string   `json:"subject" jsonschema:"the reply subject (required; typically 'Re: …')"`

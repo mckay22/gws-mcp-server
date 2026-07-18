@@ -43,7 +43,15 @@ func callTool(t *testing.T, cs *mcp.ClientSession, name string, args map[string]
 		t.Fatalf("CallTool(%s): %v", name, err)
 	}
 	if res.IsError {
-		t.Fatalf("CallTool(%s) tool error: %v", name, res.Content)
+		// Render the text content: %v on []mcp.Content prints pointers, which
+		// hides the very message the failure is about.
+		var msg strings.Builder
+		for _, c := range res.Content {
+			if tc, ok := c.(*mcp.TextContent); ok {
+				msg.WriteString(tc.Text)
+			}
+		}
+		t.Fatalf("CallTool(%s) tool error: %s", name, msg.String())
 	}
 	b, err := json.Marshal(res.StructuredContent)
 	if err != nil {

@@ -70,6 +70,27 @@ func mockApp(t *testing.T) (*httptest.Server, *appCapture) {
 		record(r)
 		writeJSON(w, http.StatusOK, `{"email":"added"}`)
 	})
+	mux.HandleFunc("GET /gmail/v1/users/{u}/messages/{id}", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		writeJSON(w, http.StatusOK, `{"id":"m1","threadId":"t1","snippet":"hi","payload":{"headers":[
+			{"name":"From","value":"grace@example.com"},{"name":"Subject","value":"Report"}]}}`)
+	})
+	mux.HandleFunc("GET /calendar/v3/calendars/primary/events", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		writeJSON(w, http.StatusOK, `{"items":[{"id":"ev1","summary":"Standup","start":{"dateTime":"2026-07-20T09:00:00Z"}}]}`)
+	})
+	mux.HandleFunc("GET /drive/v3/files", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		writeJSON(w, http.StatusOK, `{"files":[{"id":"f1","name":"notes.txt","mimeType":"text/plain"}]}`)
+	})
+	mux.HandleFunc("PUT /gmail/v1/users/{u}/settings/vacation", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		writeJSON(w, http.StatusOK, `{"enableAutoReply":true}`)
+	})
+	mux.HandleFunc("GET /gmail/v1/users/{u}/settings/vacation", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		writeJSON(w, http.StatusOK, `{"enableAutoReply":false,"responseSubject":"Old subject","responseBodyPlainText":"Old body"}`)
+	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv, cap
@@ -235,5 +256,111 @@ func TestRequireAppOnlySeparation(t *testing.T) {
 	ok := config.Config{DWDKeyPath: "/keys/rs.json", AppKeyPath: "/keys/app.json"}
 	if err := ok.RequireAppOnly(); err != nil {
 		t.Errorf("RequireAppOnly(distinct keys) = %v, want nil", err)
+	}
+}
+
+// The four app_* reads and app_set_vacation had no behavioral test: only their
+// annotations were asserted, so a wrong path, a missing impersonation target, or
+// a malformed body would have shipped green.
+
+func TestAppGetMessageImpersonatesTarget(t *testing.T) {
+	srv, cap := mockApp(t)
+	cs, ats := connectApp(t, srv, config.Config{}, nil)
+
+	_, out := callTool(t, cs, "app_get_message", map[string]any{
+		"user": "target@example.com",
+		"id":   "m1",
+	})
+	if out["from"] != "grace@example.com" || out["subject"] != "Report" {
+		t.Errorf("message = %v", out)
+	}
+	ats.mu.Lock()
+	sub := ats.lastSub
+	ats.mu.Unlock()
+	if sub != "target@example.com" {
+		t.Errorf("impersonated %q, want target@example.com", sub)
+	}
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	if got := cap.paths[len(cap.paths)-1]; got != "/gmail/v1/users/target@example.com/messages/m1" {
+		t.Errorf("path = %q", got)
+	}
+}
+
+func TestAppListEventsImpersonatesTarget(t *testing.T) {
+	srv, _ := mockApp(t)
+	cs, ats := connectApp(t, srv, config.Config{}, nil)
+
+	_, out := callTool(t, cs, "app_list_events", map[string]any{"user": "target@example.com"})
+	if out["count"] != float64(1) {
+		t.Errorf("count = %v, want 1", out["count"])
+	}
+	ats.mu.Lock()
+	defer ats.mu.Unlock()
+	if ats.lastSub != "target@example.com" {
+		t.Errorf("impersonated %q, want target@example.com", ats.lastSub)
+	}
+}
+
+func TestAppListFilesImpersonatesTarget(t *testing.T) {
+	srv, _ := mockApp(t)
+	cs, ats := connectApp(t, srv, config.Config{}, nil)
+
+	_, out := callTool(t, cs, "app_list_files", map[string]any{"user": "target@example.com"})
+	if out["count"] != float64(1) {
+		t.Errorf("count = %v, want 1", out["count"])
+	}
+	ats.mu.Lock()
+	defer ats.mu.Unlock()
+	if ats.lastSub != "target@example.com" {
+		t.Errorf("impersonated %q, want target@example.com", ats.lastSub)
+	}
+}
+
+func TestAppSetVacationRidesWriteGate(t *testing.T) {
+	srv, cap := mockApp(t)
+
+	// Gate closed → dry run, no call at all.
+	cs, _ := connectApp(t, srv, config.Config{}, nil)
+	_, out := callTool(t, cs, "app_set_vacation", map[string]any{
+		"user":    "target@example.com",
+		"enable":  true,
+		"subject": "OOO",
+		"body":    "Back Monday",
+	})
+	if out["dryRun"] != true {
+		t.Errorf("expected a dry run with the write gate closed: %v", out)
+	}
+	cap.mu.Lock()
+	if len(cap.paths) != 0 {
+		t.Errorf("dry run called Google: %v", cap.paths)
+	}
+	cap.mu.Unlock()
+
+	// Gate open → applied against the target's mailbox, as the target.
+	cs2, ats := connectApp(t, srv, config.Config{AllowWrites: true}, nil)
+	_, out2 := callTool(t, cs2, "app_set_vacation", map[string]any{
+		"user":    "target@example.com",
+		"enable":  true,
+		"subject": "OOO",
+		"body":    "Back Monday",
+	})
+	if out2["applied"] != true {
+		t.Errorf("expected applied, got %v", out2)
+	}
+	ats.mu.Lock()
+	sub := ats.lastSub
+	ats.mu.Unlock()
+	if sub != "target@example.com" {
+		t.Errorf("impersonated %q, want target@example.com", sub)
+	}
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	last := cap.paths[len(cap.paths)-1]
+	if last != "/gmail/v1/users/target@example.com/settings/vacation" {
+		t.Errorf("path = %q", last)
+	}
+	if !strings.Contains(cap.bodies[len(cap.bodies)-1], "Back Monday") {
+		t.Errorf("body = %q", cap.bodies[len(cap.bodies)-1])
 	}
 }

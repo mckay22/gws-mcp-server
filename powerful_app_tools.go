@@ -92,6 +92,9 @@ func registerAppGetMessage(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "app_get_message",
 		Annotations: readAnnotations(),
+		InputSchema: enumSchema[appGetMessageInput](map[string][]string{
+			"format": {"metadata", "full"},
+		}),
 		Title:       "App: get a user's message",
 		Description: "Fetch a single message from an explicit user's mailbox via the application service account. 'full' adds the decoded plain-text body (capped at 100 KiB).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in appGetMessageInput) (*mcp.CallToolResult, MessageDetail, error) {

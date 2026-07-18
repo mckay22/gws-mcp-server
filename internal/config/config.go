@@ -1,8 +1,10 @@
 // Package config parses the gws-mcp-server runtime configuration from the
 // environment. Credentials are read at runtime and never written to disk, logs,
-// or tool output — only presence booleans are ever exposed. Auth itself is not
-// wired up yet (M0 is scaffold; the installed-app OAuth flow lands in M1), so
-// this package parses and reports but never requires anything.
+// or tool output — only presence booleans are ever exposed.
+//
+// Parsing never fails on a missing variable: what a given mode actually requires
+// is stated by the Require* methods, which the relevant entry point calls, so a
+// deployment that uses only one mode is not forced to configure the others.
 package config
 
 import (
@@ -115,15 +117,10 @@ const ModeResourceServer = "resource-server"
 
 // ModeClassicDelegated is the default operating mode: you sign in with your own
 // Google account and the server acts as you, with Google enforcing your rights
-// on every call. The resource-server and powerful-application tiers land in
-// later milestones (M5, M8).
+// on every call.
 const ModeClassicDelegated = "classic-delegated"
 
 // Config holds everything needed to reach the Google APIs.
-//
-// M0 is a scaffold: ConfigFromEnv parses these values and reports what is
-// present, but never requires them. The OAuth client credentials are consumed
-// in M1.
 type Config struct {
 	ClientID string
 
@@ -194,10 +191,10 @@ type Config struct {
 	AppAdminSubject string
 }
 
-// ConfigFromEnv builds a Config from the GWS_* environment variables. It does
-// not require any of them: because M0 is a scaffold and auth lands in M1, a
-// missing variable is reported (as a presence boolean), not treated as an
-// error.
+// ConfigFromEnv builds a Config from the GWS_* environment variables. It requires
+// none of them: a missing variable is reported (as a presence boolean), and
+// whether it is actually needed is decided by the Require* method for the mode
+// being started.
 func ConfigFromEnv() Config {
 	return Config{
 		ClientID:             strings.TrimSpace(os.Getenv(EnvClientID)),

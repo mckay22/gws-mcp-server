@@ -84,7 +84,9 @@ const (
 	defaultTimeout = 30 * time.Second
 
 	// maxResponseBytes caps how much of a single response we read, so a
-	// misbehaving endpoint can't exhaust memory.
+	// misbehaving endpoint can't exhaust memory. Exceeding it fails the request
+	// rather than truncating: a JSON body cut at the cap would surface as a
+	// baffling parse error, and a media body would look complete when it is not.
 	maxResponseBytes = 8 << 20 // 8 MiB
 
 	// maxRetries is how many times a throttled/unavailable response (429, 503,
@@ -198,11 +200,9 @@ func (c *Client) Get(ctx context.Context, base, path string, query url.Values) (
 // downloads and exports (Drive alt=media / files.export) that return file bytes
 // rather than JSON. A non-2xx status is decoded into an *Error.
 //
-// The body is read through the shared maxResponseBytes cap and is silently
-// TRUNCATED (no error, no signal) if the response exceeds it. The current caller
-// (get_file_content) re-caps far below that and sets its own truncation flag, so
-// this is invisible today — but any future full-fidelity download caller MUST
-// account for the cap rather than assume it received the complete object.
+// The body is read through the shared maxResponseBytes cap. Exceeding it is an
+// ERROR, not a silent truncation: a caller that asked for an object's bytes must
+// never be handed a prefix it cannot distinguish from the whole.
 func (c *Client) GetRaw(ctx context.Context, base, path string, query url.Values) ([]byte, string, error) {
 	rawURL, err := c.endpoint(base, path, query)
 	if err != nil {
@@ -347,10 +347,24 @@ func (c *Client) doRaw(ctx context.Context, method, rawURL, contentType string, 
 		if err != nil {
 			return response{}, fmt.Errorf("calling Google: %w", err)
 		}
-		respBody, readErr := io.ReadAll(io.LimitReader(httpResp.Body, maxResponseBytes))
+		// Read one byte past the cap so an over-long response is detectable rather
+		// than silently truncated: a body cut mid-JSON surfaces to the caller as
+		// "unexpected end of JSON input", which points at the wrong problem.
+		respBody, readErr := io.ReadAll(io.LimitReader(httpResp.Body, maxResponseBytes+1))
 		httpResp.Body.Close()
 		if readErr != nil {
 			return response{}, fmt.Errorf("reading Google response: %w", readErr)
+		}
+		if len(respBody) > maxResponseBytes {
+			// The path, not the full URL: a query string can carry the caller's own
+			// search terms, and an error message is a place they need not appear.
+			where := rawURL
+			if u, err := url.Parse(rawURL); err == nil {
+				where = u.Host + u.Path
+			}
+			return response{}, fmt.Errorf(
+				"Google response from %s exceeds the %d-byte limit this client reads; narrow the request (smaller page size, tighter fields projection, or a more specific query)",
+				where, maxResponseBytes)
 		}
 
 		resp := response{status: httpResp.StatusCode, header: httpResp.Header, body: respBody}

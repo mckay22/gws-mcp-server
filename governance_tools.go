@@ -34,7 +34,7 @@ func registerGovernanceReadTools(server *mcp.Server, gc *gapi.Client) {
 const auditActivityFields = "items(id(time,uniqueQualifier,applicationName),actor(email,profileId),ipAddress," +
 	"events(type,name,parameters(name,value,multiValue,boolValue,intValue))),nextPageToken"
 
-// --- audit_activities ---
+// --- admin_list_audit_activities ---
 
 type auditActivitiesInput struct {
 	Application string `json:"application" jsonschema:"the audited application: login, admin, drive, token, groups, calendar, mobile, user_accounts, … (required)"`
@@ -117,8 +117,15 @@ type auditActivitiesOutput struct {
 
 func registerAuditActivities(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "audit_activities",
+		Name:        "admin_list_audit_activities",
 		Annotations: readAnnotations(),
+		InputSchema: enumSchema[auditActivitiesInput](map[string][]string{
+			"application": {
+				"access_transparency", "admin", "calendar", "chat", "drive", "gcp",
+				"groups", "groups_enterprise", "login", "meet", "mobile", "rules",
+				"saml", "token", "user_accounts",
+			},
+		}),
 		Title:       "Query audit log activities",
 		Description: "Query the Admin Reports audit log for an application (login, admin, drive, token, …): who did what, when, and from where. Some applications/event types are edition-gated and will error cleanly. Requires an admin caller with reporting privileges. Page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in auditActivitiesInput) (*mcp.CallToolResult, auditActivitiesOutput, error) {
@@ -189,7 +196,7 @@ func registerAuditActivities(server *mcp.Server, gc *gapi.Client) {
 	})
 }
 
-// --- user_connected_apps (Directory tokens.list) ---
+// --- admin_list_connected_apps (Directory tokens.list) ---
 
 type connectedAppsInput struct {
 	UserKey string `json:"userKey" jsonschema:"the user's email or id whose issued OAuth tokens to list (required)"`
@@ -211,7 +218,7 @@ type connectedAppsOutput struct {
 
 func registerConnectedApps(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "user_connected_apps",
+		Name:        "admin_list_connected_apps",
 		Annotations: readAnnotations(),
 		Title:       "List a user's connected OAuth apps",
 		Description: "List the third-party applications a user has granted OAuth access to (Directory tokens) — the connected-app / consent audit, with each app's granted scopes. Requires an admin caller with the user-security privilege.",
@@ -235,7 +242,7 @@ func registerConnectedApps(server *mcp.Server, gc *gapi.Client) {
 	})
 }
 
-// --- license_assignments ---
+// --- admin_list_license_assignments ---
 
 type licenseAssignmentsInput struct {
 	ProductID  string `json:"productId" jsonschema:"the license product id, e.g. 'Google-Apps' for Workspace (required)"`
@@ -261,7 +268,7 @@ type licenseAssignmentsOutput struct {
 
 func registerLicenseAssignments(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "license_assignments",
+		Name:        "admin_list_license_assignments",
 		Annotations: readAnnotations(),
 		Title:       "List license assignments",
 		Description: "List license assignments for a product (optionally a single SKU) across the account's users (Enterprise License Manager). Requires an admin caller; free/edition-limited tenants may return an error, which is surfaced. Page with nextPageToken.",

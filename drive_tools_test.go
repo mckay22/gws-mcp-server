@@ -84,7 +84,7 @@ func TestListFilesDefaultRecent(t *testing.T) {
 	srv, cap := mockDrive(t)
 	cs := connectDrive(t, srv)
 
-	_, out := callTool(t, cs, "list_files", map[string]any{})
+	_, out := callTool(t, cs, "drive_list_files", map[string]any{})
 	if out["count"] != float64(2) {
 		t.Errorf("count = %v, want 2", out["count"])
 	}
@@ -106,7 +106,7 @@ func TestListFilesWithQueryAndSharedDrives(t *testing.T) {
 	srv, cap := mockDrive(t)
 	cs := connectDrive(t, srv)
 
-	callTool(t, cs, "list_files", map[string]any{
+	callTool(t, cs, "drive_list_files", map[string]any{
 		"query":               "name contains 'report'",
 		"includeSharedDrives": true,
 	})
@@ -124,7 +124,7 @@ func TestGetFileContentExportsGoogleDoc(t *testing.T) {
 	srv, _ := mockDrive(t)
 	cs := connectDrive(t, srv)
 
-	_, out := callTool(t, cs, "get_file_content", map[string]any{"fileId": "doc1"})
+	_, out := callTool(t, cs, "drive_get_file_content", map[string]any{"fileId": "doc1"})
 	if out["exported"] != true {
 		t.Errorf("exported = %v, want true", out["exported"])
 	}
@@ -137,7 +137,7 @@ func TestGetFileContentDownloadsPlainFile(t *testing.T) {
 	srv, _ := mockDrive(t)
 	cs := connectDrive(t, srv)
 
-	_, out := callTool(t, cs, "get_file_content", map[string]any{"fileId": "txt1"})
+	_, out := callTool(t, cs, "drive_get_file_content", map[string]any{"fileId": "txt1"})
 	if out["exported"] != false {
 		t.Errorf("exported = %v, want false", out["exported"])
 	}
@@ -150,7 +150,7 @@ func TestGetFileContentRejectsNoTextExport(t *testing.T) {
 	srv, _ := mockDrive(t)
 	cs := connectDrive(t, srv)
 
-	msg := callToolErr(t, cs, "get_file_content", map[string]any{"fileId": "form1"})
+	msg := callToolErr(t, cs, "drive_get_file_content", map[string]any{"fileId": "form1"})
 	if !strings.Contains(msg, "no text export") {
 		t.Errorf("error = %q, want 'no text export'", msg)
 	}
@@ -168,7 +168,7 @@ func TestGetFileContentRejectsBinary(t *testing.T) {
 		{"pdf1", "application/pdf"},
 		{"png1", "image/png"},
 	} {
-		msg := callToolErr(t, cs, "get_file_content", map[string]any{"fileId": tc.id})
+		msg := callToolErr(t, cs, "drive_get_file_content", map[string]any{"fileId": tc.id})
 		if !strings.Contains(msg, "text only") || !strings.Contains(msg, tc.mime) {
 			t.Errorf("%s: error = %q, want it to name %s and say text only", tc.id, msg, tc.mime)
 		}
@@ -181,7 +181,7 @@ func TestGetFileContentAllowsTextualNonTextTypes(t *testing.T) {
 	srv, _ := mockDrive(t)
 	cs := connectDrive(t, srv)
 
-	_, out := callTool(t, cs, "get_file_content", map[string]any{"fileId": "json1"})
+	_, out := callTool(t, cs, "drive_get_file_content", map[string]any{"fileId": "json1"})
 	if out["content"] == "" {
 		t.Errorf("application/json was rejected or returned empty: %v", out)
 	}
@@ -239,7 +239,7 @@ func TestGetFileContentNotFound(t *testing.T) {
 	srv, _ := mockDrive(t)
 	cs := connectDrive(t, srv)
 
-	msg := callToolErr(t, cs, "get_file_content", map[string]any{"fileId": "missing"})
+	msg := callToolErr(t, cs, "drive_get_file_content", map[string]any{"fileId": "missing"})
 	if !strings.Contains(msg, "not found") && !strings.Contains(msg, "File not found") {
 		t.Errorf("error = %q, want not-found", msg)
 	}

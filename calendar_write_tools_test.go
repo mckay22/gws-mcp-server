@@ -73,7 +73,7 @@ func TestCreateAppointmentRidesWriteGate(t *testing.T) {
 	srv, cap := mockCalendarWrite(t)
 	cs := connectCalendarWrite(t, srv, true, false) // write open, send closed
 
-	_, out := callTool(t, cs, "create_appointment", map[string]any{
+	_, out := callTool(t, cs, "calendar_create_appointment", map[string]any{
 		"summary": "Focus time",
 		"start":   "2026-07-20T09:00:00Z",
 		"end":     "2026-07-20T10:00:00Z",
@@ -97,7 +97,7 @@ func TestCreateEventWithAttendeesRidesSendGate(t *testing.T) {
 	// Write gate open, send gate closed → must be a dry-run (attendees would be
 	// emailed).
 	cs := connectCalendarWrite(t, srv, true, false)
-	_, out := callTool(t, cs, "create_event_with_attendees", map[string]any{
+	_, out := callTool(t, cs, "calendar_create_event_with_attendees", map[string]any{
 		"summary":   "Sync",
 		"start":     "2026-07-20T09:00:00Z",
 		"end":       "2026-07-20T10:00:00Z",
@@ -112,7 +112,7 @@ func TestCreateEventWithAttendeesRidesSendGate(t *testing.T) {
 
 	// Send gate open → applies, with sendUpdates=all.
 	cs2 := connectCalendarWrite(t, srv, false, true)
-	_, out2 := callTool(t, cs2, "create_event_with_attendees", map[string]any{
+	_, out2 := callTool(t, cs2, "calendar_create_event_with_attendees", map[string]any{
 		"summary":   "Sync",
 		"start":     "2026-07-20T09:00:00Z",
 		"end":       "2026-07-20T10:00:00Z",
@@ -135,7 +135,7 @@ func TestCancelEventRidesSendGate(t *testing.T) {
 	srv, cap := mockCalendarWrite(t)
 	cs := connectCalendarWrite(t, srv, false, true)
 
-	_, out := callTool(t, cs, "cancel_event", map[string]any{"eventId": "ev1"})
+	_, out := callTool(t, cs, "calendar_cancel_event", map[string]any{"eventId": "ev1"})
 	if out["applied"] != true {
 		t.Errorf("expected applied, got %v", out)
 	}
@@ -150,7 +150,7 @@ func TestRespondToEventValidatesResponse(t *testing.T) {
 	srv, _ := mockCalendarWrite(t)
 	cs := connectCalendarWrite(t, srv, false, true)
 
-	msg := callToolErr(t, cs, "respond_to_event", map[string]any{
+	msg := callToolErr(t, cs, "calendar_respond_to_event", map[string]any{
 		"eventId":   "ev1",
 		"selfEmail": "ada@example.com",
 		"response":  "maybe",
@@ -169,10 +169,10 @@ func TestRespondToEventPreservesOtherAttendees(t *testing.T) {
 	srv, cap := mockCalendarWrite(t)
 	cs := connectCalendarWrite(t, srv, false, true)
 
-	_, out := callTool(t, cs, "respond_to_event", map[string]any{
+	_, out := callTool(t, cs, "calendar_respond_to_event", map[string]any{
 		"eventId":   "ev1",
 		"selfEmail": "ada@example.com",
-		"response":  "Accepted",
+		"response":  "accepted",
 	})
 	if out["applied"] != true {
 		t.Errorf("expected applied, got %v", out)
@@ -210,7 +210,7 @@ func TestRespondToEventDryRunCallsNothing(t *testing.T) {
 	srv, cap := mockCalendarWrite(t)
 	cs := connectCalendarWrite(t, srv, true, false) // write open, send CLOSED
 
-	_, out := callTool(t, cs, "respond_to_event", map[string]any{
+	_, out := callTool(t, cs, "calendar_respond_to_event", map[string]any{
 		"eventId":   "ev1",
 		"selfEmail": "ada@example.com",
 		"response":  "accepted",
@@ -231,7 +231,7 @@ func TestRespondToEventRefusesNonAttendee(t *testing.T) {
 	srv, cap := mockCalendarWrite(t)
 	cs := connectCalendarWrite(t, srv, false, true)
 
-	msg := callToolErr(t, cs, "respond_to_event", map[string]any{
+	msg := callToolErr(t, cs, "calendar_respond_to_event", map[string]any{
 		"eventId":   "ev1",
 		"selfEmail": "stranger@example.com",
 		"response":  "accepted",
@@ -250,12 +250,72 @@ func TestCreateAppointmentValidatesTime(t *testing.T) {
 	srv, _ := mockCalendarWrite(t)
 	cs := connectCalendarWrite(t, srv, true, false)
 
-	msg := callToolErr(t, cs, "create_appointment", map[string]any{
+	msg := callToolErr(t, cs, "calendar_create_appointment", map[string]any{
 		"summary": "x",
 		"start":   "not-a-time",
 		"end":     "2026-07-20T10:00:00Z",
 	})
 	if !strings.Contains(msg, "RFC3339") {
 		t.Errorf("error = %q, want RFC3339 validation", msg)
+	}
+}
+
+// calendar_update_event had no behavioral test: only the fields the caller names
+// may be patched (Calendar overwrites what you send), and attendees must be
+// notified, since that is why the tool is send-gated.
+func TestUpdateEventPatchesOnlyNamedFields(t *testing.T) {
+	srv, cap := mockCalendarWrite(t)
+
+	// Write gate alone must not apply it — attendees get emailed.
+	cs := connectCalendarWrite(t, srv, true, false)
+	_, out := callTool(t, cs, "calendar_update_event", map[string]any{
+		"eventId": "ev1",
+		"summary": "Renamed",
+	})
+	if out["dryRun"] != true {
+		t.Errorf("update must be a dry run when only the write gate is open: %v", out)
+	}
+
+	cs2 := connectCalendarWrite(t, srv, false, true)
+	_, out2 := callTool(t, cs2, "calendar_update_event", map[string]any{
+		"eventId":  "ev1",
+		"summary":  "Renamed",
+		"location": "Room 2",
+	})
+	if out2["applied"] != true {
+		t.Errorf("expected applied, got %v", out2)
+	}
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	if cap.method != http.MethodPatch {
+		t.Errorf("method = %q, want PATCH", cap.method)
+	}
+	if cap.sendUpdates != "all" {
+		t.Errorf("sendUpdates = %q, want all — attendees must be told", cap.sendUpdates)
+	}
+	if !strings.Contains(cap.body, "Renamed") || !strings.Contains(cap.body, "Room 2") {
+		t.Errorf("body = %q, want the named fields", cap.body)
+	}
+	// Unnamed fields must not appear: sending them would overwrite live values.
+	for _, unwanted := range []string{`"start"`, `"end"`, `"description"`, `"attendees"`} {
+		if strings.Contains(cap.body, unwanted) {
+			t.Errorf("body = %q, must not send unnamed field %s", cap.body, unwanted)
+		}
+	}
+}
+
+func TestUpdateEventValidatesTimes(t *testing.T) {
+	srv, cap := mockCalendarWrite(t)
+	cs := connectCalendarWrite(t, srv, false, true)
+
+	msg := callToolErr(t, cs, "calendar_update_event", map[string]any{
+		"eventId": "ev1",
+		"start":   "tomorrow morning",
+	})
+	if !strings.Contains(msg, "RFC3339") {
+		t.Errorf("error = %q, want an RFC3339 rejection", msg)
+	}
+	if cap.called {
+		t.Error("an invalid update reached Google")
 	}
 }

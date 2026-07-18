@@ -256,7 +256,7 @@ func registerChatSendMessage(server *mcp.Server, gc *gapi.Client, allowWrites, a
 	})
 }
 
-// --- meet_conference_records ---
+// --- meet_list_conference_records ---
 
 type meetRecordsInput struct {
 	Filter    string `json:"filter,omitempty" jsonschema:"optional Meet filter; values must be quoted, e.g. space.meeting_code = \"abc-mnop-xyz\" or start_time >= \"2026-07-01T00:00:00Z\""`
@@ -280,7 +280,7 @@ type meetRecordsOutput struct {
 
 func registerMeetConferenceRecords(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "meet_conference_records",
+		Name:        "meet_list_conference_records",
 		Annotations: readAnnotations(),
 		Title:       "List Meet conference records",
 		Description: "List Google Meet conference records the signed-in user has access to (Workspace, edition-gated — errors cleanly if unavailable). Each record's id leads to its recordings/transcripts. Page with nextPageToken.",

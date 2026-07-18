@@ -7,6 +7,17 @@ Every tool acts as a real Google identity and Google enforces authorization —
 this server adds no permission model of its own. In classic-delegated mode that
 identity is the signed-in user, and all Gmail tools target `/users/me`.
 
+## Naming
+
+Every tool is `<service>_<verb>[_<object>]`: the service prefix first, so names
+stay unambiguous when several MCP servers are connected at once, then what the
+tool does. `health` is the one exception — it describes the server, not a Google
+service.
+
+Services are `gmail_`, `calendar_`, `drive_`, `directory_` (Admin SDK Directory),
+`admin_` (Admin SDK Reports/Licensing), `tasks_`, `people_`, `chat_`, `meet_`, and
+`app_` (the powerful-application tier, which acts on an explicit `user` target).
+
 ## Tool annotations
 
 Every tool advertises MCP tool annotations, so a client — or a policy layer in
@@ -46,11 +57,10 @@ Scope: `https://www.googleapis.com/auth/gmail.readonly`.
 
 | Tool | Kind | Description |
 | --- | --- | --- |
-| `get_profile` | 🟢 | The signed-in user's Gmail profile: email address, total message/thread counts. |
-| `list_labels` | 🟢 | System and user labels with their ids (for use as `labelIds` filters). |
-| `list_messages` | 🟢 | List messages (optionally filtered by a Gmail query and/or label ids). Returns message + thread ids; page with `nextPageToken`. |
-| `search_messages` | 🟢 | Same as `list_messages` but with a required Gmail query (`from:`, `is:unread`, `has:attachment`, `newer_than:`, …). |
-| `get_message` | 🟢 | One message by id. `metadata` (default): common headers + snippet. `full`: adds the decoded body (capped at 100 KiB) — the plain-text part, or the HTML reduced to text when the message carries HTML only, flagged with `bodyFromHtml`. |
+| `gmail_get_profile` | 🟢 | The signed-in user's Gmail profile: email address, total message/thread counts. |
+| `gmail_list_labels` | 🟢 | System and user labels with their ids (for use as `labelIds` filters). |
+| `gmail_list_messages` | 🟢 | List **or search** messages: pass a Gmail query (`from:`, `is:unread`, `has:attachment`, `newer_than:`, …) and/or label ids, or omit both to list. Returns message + thread ids; page with `nextPageToken`. |
+| `gmail_get_message` | 🟢 | One message by id. `metadata` (default): common headers + snippet. `full`: adds the decoded body (capped at 100 KiB) — the plain-text part, or the HTML reduced to text when the message carries HTML only, flagged with `bodyFromHtml`. |
 
 ### Projection and paging
 
@@ -68,10 +78,10 @@ Scope: `https://www.googleapis.com/auth/calendar.readonly`.
 
 | Tool | Kind | Description |
 | --- | --- | --- |
-| `list_calendars` | 🟢 | The user's calendar list with ids, access role, and time zone. |
-| `list_events` | 🟢 | Events in a calendar within a time window (default primary calendar, next 30 days), expanded to single instances and ordered by start time. One page; `nextPageToken`. |
-| `get_event` | 🟢 | One event by id, including description and attendee RSVP states. |
-| `freebusy_query` | 🟢 | Busy intervals for one or more calendars in a window (default primary, next 7 days) — availability without event details. |
+| `calendar_list_calendars` | 🟢 | The user's calendar list with ids, access role, and time zone. |
+| `calendar_list_events` | 🟢 | Events in a calendar within a time window (default primary calendar, next 30 days), expanded to single instances and ordered by start time. One page; `nextPageToken`. |
+| `calendar_get_event` | 🟢 | One event by id, including description and attendee RSVP states. |
+| `calendar_freebusy` | 🟢 | Busy intervals for one or more calendars in a window (default primary, next 7 days) — availability without event details. |
 
 Time bounds are RFC3339; blank values default, malformed values are rejected.
 
@@ -81,8 +91,8 @@ Scope: `https://www.googleapis.com/auth/drive.readonly`.
 
 | Tool | Kind | Description |
 | --- | --- | --- |
-| `list_files` | 🟢 | List (recent-first) or search files with Drive's query syntax. One page of metadata; `nextPageToken`; optional shared-drive span. Trash excluded by default. |
-| `get_file_content` | 🟢 | A file's text content by id. Google Docs/Sheets/Slides are exported to text/CSV; other files download directly; binary-only files are rejected. Capped at 200 KiB. |
+| `drive_list_files` | 🟢 | List (recent-first) or search files with Drive's query syntax. One page of metadata; `nextPageToken`; optional shared-drive span. Trash excluded by default. |
+| `drive_get_file_content` | 🟢 | A file's text content by id. Google Docs/Sheets/Slides are exported to text/CSV; other files download directly; binary-only files are rejected. Capped at 200 KiB. |
 
 ## Gated writes and sends (M3)
 
@@ -97,16 +107,16 @@ the matching gate is open.
 | Tool | Kind | Description |
 | --- | --- | --- |
 | `gmail_create_draft` | 🟡 | Save a draft (not sent). |
-| `gmail_modify` | 🟡 | Add/remove message labels — the mechanism behind read/unread, archive, star. |
+| `gmail_modify_labels` | 🟡 | Add/remove message labels — the mechanism behind read/unread, archive, star. |
 | `gmail_send` | 🔴 | Send a new message as the user. Preview shows full To/Cc/Subject/body. |
 | `gmail_reply` | 🔴 | Send a reply within a thread. |
-| `create_appointment` | 🟡 | Create an event with **no attendees** (nobody emailed). |
-| `create_event_with_attendees` | 🔴 | Create an event and email invitations (`sendUpdates=all`). |
-| `update_event` | 🔴 | Patch an event and notify attendees. |
-| `cancel_event` | 🔴 | Delete/cancel an event and notify attendees. |
-| `respond_to_event` | 🔴 | Set the user's RSVP and notify the organizer. |
-| `upload_file` | 🟡 | Create a Drive file from text content (multipart upload). |
-| `share_file` | 🔴 | Grant a permission on a file/folder — egress. |
+| `calendar_create_appointment` | 🟡 | Create an event with **no attendees** (nobody emailed). |
+| `calendar_create_event_with_attendees` | 🔴 | Create an event and email invitations (`sendUpdates=all`). |
+| `calendar_update_event` | 🔴 | Patch an event and notify attendees. |
+| `calendar_cancel_event` | 🔴 | Delete/cancel an event and notify attendees. |
+| `calendar_respond_to_event` | 🔴 | Set the user's RSVP and notify the organizer. |
+| `drive_upload_file` | 🟡 | Create a Drive file from text content (multipart upload). |
+| `drive_share_file` | 🔴 | Grant a permission on a file/folder — egress. |
 
 The Calendar **attendee split is the gate split**: an appointment with no
 attendees notifies no one (write gate); anything that emails attendees or the
@@ -121,12 +131,12 @@ switch off. Google enforces the caller's admin privileges on every call.
 
 | Tool | Kind | Description |
 | --- | --- | --- |
-| `directory_users_search` | 🟢 | Search/list directory users (Admin SDK query syntax). Compact summaries; `nextPageToken`. |
-| `directory_user_get` | 🟢 | One user by email/id: aliases, org unit, admin flags, 2SV enrollment. |
-| `directory_groups_search` | 🟢 | Search/list groups, optionally those a given user belongs to. |
-| `directory_group_members` | 🟢 | A group's members with role (OWNER/MANAGER/MEMBER) and type. |
-| `directory_roles_list` | 🟢 | Admin roles (system + custom), flagging super-admin. |
-| `directory_role_assignments` | 🟢 | Who holds which admin role, filterable by user or role id. |
+| `directory_search_users` | 🟢 | Search/list directory users (Admin SDK query syntax). Compact summaries; `nextPageToken`. |
+| `directory_get_user` | 🟢 | One user by email/id: aliases, org unit, admin flags, 2SV enrollment. |
+| `directory_search_groups` | 🟢 | Search/list groups, optionally those a given user belongs to. |
+| `directory_list_group_members` | 🟢 | A group's members with role (OWNER/MANAGER/MEMBER) and type. |
+| `directory_list_roles` | 🟢 | Admin roles (system + custom), flagging super-admin. |
+| `directory_list_role_assignments` | 🟢 | Who holds which admin role, filterable by user or role id. |
 
 ## Governance (M6, Admin SDK)
 
@@ -137,15 +147,15 @@ Google error cleanly.
 
 | Tool | Kind | Description |
 | --- | --- | --- |
-| `audit_activities` | 🟢 | Admin Reports audit log for an application (login/admin/drive/token/…): who did what, when, from where. |
-| `user_connected_apps` | 🟢 | The third-party OAuth apps a user has granted access to, with scopes — the connected-app/consent audit. |
-| `license_assignments` | 🟢 | License assignments for a product/SKU across users (Enterprise License Manager). |
-| `directory_user_create` | 🟡 | Create a user (password **redacted** in the preview). |
-| `directory_user_update` | 🟡 | Patch a user's name / org unit. |
-| `directory_user_suspend` | 🟡 | Suspend or un-suspend a user. |
-| `directory_group_create` | 🟡 | Create a group. |
-| `directory_group_add_member` | 🟡 | Add a member with a role. |
-| `directory_group_remove_member` | 🟡 | Remove a member. |
+| `admin_list_audit_activities` | 🟢 | Admin Reports audit log for an application (login/admin/drive/token/…): who did what, when, from where. |
+| `admin_list_connected_apps` | 🟢 | The third-party OAuth apps a user has granted access to, with scopes — the connected-app/consent audit. |
+| `admin_list_license_assignments` | 🟢 | License assignments for a product/SKU across users (Enterprise License Manager). |
+| `directory_create_user` | 🟡 | Create a user (password **redacted** in the preview). |
+| `directory_update_user` | 🟡 | Patch a user's name / org unit. |
+| `directory_suspend_user` | 🟡 | Suspend or un-suspend a user. |
+| `directory_create_group` | 🟡 | Create a group. |
+| `directory_add_group_member` | 🟡 | Add a member with a role. |
+| `directory_remove_group_member` | 🟡 | Remove a member. |
 
 ## Powerful-delegated tier (M7)
 
@@ -169,7 +179,7 @@ requested only when the switch is on.
 | `chat_list_spaces` | 🟢 | Google Chat spaces the user is in. |
 | `chat_list_messages` | 🟢 | Messages in a Chat space. |
 | `chat_send_message` | 🔴 | Post a message to a Chat space. |
-| `meet_conference_records` | 🟢 | Meet conference records (→ recordings/transcripts). |
+| `meet_list_conference_records` | 🟢 | Meet conference records (→ recordings/transcripts). |
 | `drive_shared_with_me` | 🟢 | Files others have shared with the user. |
 
 ## Powerful-application tier (M8)
@@ -204,7 +214,3 @@ a trusted OIDC issuer, mapped to a Google user, and impersonated via domain-wide
 delegation. See [auth.md](auth.md) for the identity model. The tool inventory is
 identical to stdio mode; only the identity backend changes.
 
-## Later milestones
-
-Governance (Reports/audit, Directory writes), and the powerful-delegated and
-powerful-application tiers land in subsequent milestones.

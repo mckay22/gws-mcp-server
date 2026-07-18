@@ -64,7 +64,7 @@ func TestUploadFileRidesWriteGate(t *testing.T) {
 
 	// Gate closed → dry-run, no call, readable preview.
 	cs := connectDriveWrite(t, srv, false, false)
-	_, out := callTool(t, cs, "upload_file", map[string]any{
+	_, out := callTool(t, cs, "drive_upload_file", map[string]any{
 		"name":    "notes.txt",
 		"content": "hello file",
 	})
@@ -77,7 +77,7 @@ func TestUploadFileRidesWriteGate(t *testing.T) {
 
 	// Gate open → multipart upload applied.
 	cs2 := connectDriveWrite(t, srv, true, false)
-	_, out2 := callTool(t, cs2, "upload_file", map[string]any{
+	_, out2 := callTool(t, cs2, "drive_upload_file", map[string]any{
 		"name":    "notes.txt",
 		"content": "hello file",
 	})
@@ -120,7 +120,7 @@ func TestUploadBoundaryIsUnpredictable(t *testing.T) {
 	srv, cap := mockDriveWrite(t)
 	cs := connectDriveWrite(t, srv, true, false)
 	hostile := "line one\r\n--gws-mcp-upload-boundary\r\nContent-Type: text/plain\r\n\r\ninjected\r\n"
-	callTool(t, cs, "upload_file", map[string]any{
+	callTool(t, cs, "drive_upload_file", map[string]any{
 		"name":    "notes.txt",
 		"content": hostile,
 	})
@@ -162,14 +162,14 @@ func TestShareFileRidesSendGate(t *testing.T) {
 
 	// Write gate open, send gate closed → dry-run (sharing is egress).
 	cs := connectDriveWrite(t, srv, true, false)
-	_, out := callTool(t, cs, "share_file", map[string]any{
+	_, out := callTool(t, cs, "drive_share_file", map[string]any{
 		"fileId":       "file1",
 		"role":         "reader",
 		"type":         "user",
 		"emailAddress": "grace@example.com",
 	})
 	if out["dryRun"] != true {
-		t.Errorf("share_file must be a dry-run when only the write gate is open: %v", out)
+		t.Errorf("drive_share_file must be a dry-run when only the write gate is open: %v", out)
 	}
 	if cap.called {
 		t.Error("must not share when the send gate is closed")
@@ -177,7 +177,7 @@ func TestShareFileRidesSendGate(t *testing.T) {
 
 	// Send gate open → applied.
 	cs2 := connectDriveWrite(t, srv, false, true)
-	_, out2 := callTool(t, cs2, "share_file", map[string]any{
+	_, out2 := callTool(t, cs2, "drive_share_file", map[string]any{
 		"fileId":       "file1",
 		"role":         "reader",
 		"type":         "user",
@@ -201,7 +201,7 @@ func TestShareFileValidatesGrantee(t *testing.T) {
 	cs := connectDriveWrite(t, srv, false, true)
 
 	// type user without emailAddress → error.
-	msg := callToolErr(t, cs, "share_file", map[string]any{
+	msg := callToolErr(t, cs, "drive_share_file", map[string]any{
 		"fileId": "file1",
 		"role":   "reader",
 		"type":   "user",
@@ -215,13 +215,16 @@ func TestShareFileValidatesRole(t *testing.T) {
 	srv, _ := mockDriveWrite(t)
 	cs := connectDriveWrite(t, srv, false, true)
 
-	msg := callToolErr(t, cs, "share_file", map[string]any{
+	msg := callToolErr(t, cs, "drive_share_file", map[string]any{
 		"fileId":       "file1",
 		"role":         "owner",
 		"type":         "user",
 		"emailAddress": "grace@example.com",
 	})
-	if !strings.Contains(msg, "role must be") {
-		t.Errorf("error = %q", msg)
+	// The schema enum rejects it before the handler runs, naming the valid roles.
+	for _, want := range []string{"role", "reader", "commenter", "writer"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error = %q, want it to mention %q", msg, want)
+		}
 	}
 }

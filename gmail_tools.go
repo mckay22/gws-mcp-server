@@ -22,11 +22,10 @@ func registerGmailReadTools(server *mcp.Server, gc *gapi.Client) {
 	registerGetProfile(server, gc)
 	registerListLabels(server, gc)
 	registerListMessages(server, gc)
-	registerSearchMessages(server, gc)
 	registerGetMessage(server, gc)
 }
 
-// maxBodyBytes caps the decoded body get_message returns, so a large
+// maxBodyBytes caps the decoded body gmail_get_message returns, so a large
 // message can't flood model context. Anything longer is truncated with a flag.
 const maxBodyBytes = 100 << 10 // 100 KiB
 
@@ -39,15 +38,15 @@ const (
 	messageFullFields = "id,threadId,labelIds,snippet,sizeEstimate,payload"
 )
 
-// metadataHeaders is the set of headers get_message requests in metadata format
+// metadataHeaders is the set of headers gmail_get_message requests in metadata format
 // — enough to summarize a message without pulling the whole header block.
 var metadataHeaders = []string{"From", "To", "Cc", "Subject", "Date"}
 
-// --- get_profile ---
+// --- gmail_get_profile ---
 
 type getProfileInput struct{}
 
-// GmailProfile is the mailbox summary returned by get_profile; its JSON tags
+// GmailProfile is the mailbox summary returned by gmail_get_profile; its JSON tags
 // double as the decode target for the Gmail users.getProfile response.
 type GmailProfile struct {
 	EmailAddress  string `json:"emailAddress"`
@@ -58,7 +57,7 @@ type GmailProfile struct {
 
 func registerGetProfile(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_profile",
+		Name:        "gmail_get_profile",
 		Annotations: readAnnotations(),
 		Title:       "Get Gmail profile",
 		Description: "Return the signed-in user's Gmail profile: email address and total message/thread counts. Makes a live call as the current user.",
@@ -75,7 +74,7 @@ func registerGetProfile(server *mcp.Server, gc *gapi.Client) {
 	})
 }
 
-// --- list_labels ---
+// --- gmail_list_labels ---
 
 type listLabelsInput struct{}
 
@@ -96,10 +95,10 @@ type listLabelsOutput struct {
 
 func registerListLabels(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_labels",
+		Name:        "gmail_list_labels",
 		Annotations: readAnnotations(),
 		Title:       "List Gmail labels",
-		Description: "List the signed-in user's Gmail labels (system labels like INBOX/SENT/UNREAD and user-created labels), with their ids for use as labelIds filters in list_messages.",
+		Description: "List the signed-in user's Gmail labels (system labels like INBOX/SENT/UNREAD and user-created labels), with their ids for use as labelIds filters in gmail_list_messages.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ listLabelsInput) (*mcp.CallToolResult, listLabelsOutput, error) {
 		q := url.Values{"fields": {labelFields}}
 		raw, err := gc.Get(ctx, gapi.BaseGmail, "/users/me/labels", q)
@@ -117,7 +116,7 @@ func registerListLabels(server *mcp.Server, gc *gapi.Client) {
 	})
 }
 
-// --- list_messages / search_messages (shared) ---
+// --- gmail_list_messages ---
 
 // MessageRef is the compact message summary Gmail's list endpoint returns: only
 // ids. Gmail is thread-centric, so the threadId is surfaced as a first-class
@@ -136,15 +135,7 @@ type messageListOutput struct {
 
 type listMessagesInput struct {
 	Query            string   `json:"query,omitempty" jsonschema:"optional Gmail search query, same syntax as the Gmail search box (e.g. 'from:alice is:unread newer_than:7d')"`
-	LabelIDs         []string `json:"labelIds,omitempty" jsonschema:"optional label ids to filter by (AND); get ids from list_labels"`
-	MaxResults       int      `json:"maxResults,omitempty" jsonschema:"page size 1-100 (default 25)"`
-	PageToken        string   `json:"pageToken,omitempty" jsonschema:"continuation token from a previous call's nextPageToken"`
-	IncludeSpamTrash bool     `json:"includeSpamTrash,omitempty" jsonschema:"include SPAM and TRASH messages (default false)"`
-}
-
-type searchMessagesInput struct {
-	Query            string   `json:"query" jsonschema:"Gmail search query, same syntax as the Gmail search box (e.g. 'from:alice is:unread newer_than:7d')"`
-	LabelIDs         []string `json:"labelIds,omitempty" jsonschema:"optional label ids to further filter by (AND)"`
+	LabelIDs         []string `json:"labelIds,omitempty" jsonschema:"optional label ids to filter by (AND); get ids from gmail_list_labels"`
 	MaxResults       int      `json:"maxResults,omitempty" jsonschema:"page size 1-100 (default 25)"`
 	PageToken        string   `json:"pageToken,omitempty" jsonschema:"continuation token from a previous call's nextPageToken"`
 	IncludeSpamTrash bool     `json:"includeSpamTrash,omitempty" jsonschema:"include SPAM and TRASH messages (default false)"`
@@ -152,10 +143,10 @@ type searchMessagesInput struct {
 
 func registerListMessages(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_messages",
+		Name:        "gmail_list_messages",
 		Annotations: readAnnotations(),
-		Title:       "List Gmail messages",
-		Description: "List messages in the signed-in mailbox, most recent first. Optionally filter by a Gmail search query and/or label ids. Returns message + thread ids only (metadata is fetched per-message via get_message); page with nextPageToken.",
+		Title:       "List or search Gmail messages",
+		Description: "List or SEARCH messages in the signed-in mailbox, most recent first. Pass a Gmail search query to search (same syntax as the Gmail search box: from:, is:unread, has:attachment, newer_than:, …) and/or filter by label ids; omit both to list the mailbox. Returns message + thread ids only (metadata is fetched per-message via gmail_get_message); page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listMessagesInput) (*mcp.CallToolResult, messageListOutput, error) {
 		out, err := listMessages(ctx, gc, "me", in.Query, in.LabelIDs, in.MaxResults, in.PageToken, in.IncludeSpamTrash)
 		if err != nil {
@@ -165,25 +156,7 @@ func registerListMessages(server *mcp.Server, gc *gapi.Client) {
 	})
 }
 
-func registerSearchMessages(server *mcp.Server, gc *gapi.Client) {
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "search_messages",
-		Annotations: readAnnotations(),
-		Title:       "Search Gmail messages",
-		Description: "Search the signed-in mailbox with a Gmail query (from:, to:, subject:, is:unread, has:attachment, newer_than:, before:, label:, …). Returns message + thread ids only; page with nextPageToken and fetch details via get_message.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchMessagesInput) (*mcp.CallToolResult, messageListOutput, error) {
-		if strings.TrimSpace(in.Query) == "" {
-			return nil, messageListOutput{}, fmt.Errorf("query is required")
-		}
-		out, err := listMessages(ctx, gc, "me", in.Query, in.LabelIDs, in.MaxResults, in.PageToken, in.IncludeSpamTrash)
-		if err != nil {
-			return nil, messageListOutput{}, err
-		}
-		return text(fmt.Sprintf("%d messages match", out.Count)), out, nil
-	})
-}
-
-// listMessages is the shared body of list_messages, search_messages, and
+// listMessages is the shared body of gmail_list_messages and
 // app_list_messages: it calls Gmail users.messages.list for the given user ("me"
 // or an explicit address) with the given filters and returns one bounded page,
 // exposing nextPageToken for caller-driven continuation.
@@ -226,14 +199,14 @@ func listMessages(ctx context.Context, gc *gapi.Client, user, query string, labe
 	}, nil
 }
 
-// --- get_message ---
+// --- gmail_get_message ---
 
 type getMessageInput struct {
-	ID     string `json:"id" jsonschema:"the message id from list_messages/search_messages"`
+	ID     string `json:"id" jsonschema:"the message id from gmail_list_messages"`
 	Format string `json:"format,omitempty" jsonschema:"'metadata' for headers + snippet (default) or 'full' to also include the decoded message body"`
 }
 
-// MessageDetail is the summarized single message get_message returns. Common
+// MessageDetail is the summarized single message gmail_get_message returns. Common
 // headers are lifted out of the raw header block; Body is populated only in
 // 'full' format.
 type MessageDetail struct {
@@ -275,10 +248,13 @@ type gmailBody struct {
 
 func registerGetMessage(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_message",
+		Name:        "gmail_get_message",
 		Annotations: readAnnotations(),
+		InputSchema: enumSchema[getMessageInput](map[string][]string{
+			"format": {"metadata", "full"},
+		}),
 		Title:       "Get Gmail message",
-		Description: "Fetch a single message by id. Default 'metadata' format returns the common headers (From/To/Cc/Subject/Date) plus the snippet; 'full' also returns the decoded body (capped at 100 KiB): the plain-text part, or the HTML part reduced to text when the message has no plain-text alternative (bodyFromHtml is set in that case). Use ids from list_messages/search_messages.",
+		Description: "Fetch a single message by id. Default 'metadata' format returns the common headers (From/To/Cc/Subject/Date) plus the snippet; 'full' also returns the decoded body (capped at 100 KiB): the plain-text part, or the HTML part reduced to text when the message has no plain-text alternative (bodyFromHtml is set in that case). Use ids from gmail_list_messages.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in getMessageInput) (*mcp.CallToolResult, MessageDetail, error) {
 		detail, err := fetchMessageDetail(ctx, gc, "me", in.ID, in.Format)
 		if err != nil {
@@ -294,7 +270,7 @@ func registerGetMessage(server *mcp.Server, gc *gapi.Client) {
 
 // fetchMessageDetail fetches and summarizes one Gmail message for the given user
 // ("me" for the signed-in user, or an explicit address for the application
-// tier), validating the format. It is shared by get_message and app_get_message.
+// tier), validating the format. It is shared by gmail_get_message and app_get_message.
 func fetchMessageDetail(ctx context.Context, gc *gapi.Client, user, id, format string) (MessageDetail, error) {
 	if strings.TrimSpace(id) == "" {
 		return MessageDetail{}, fmt.Errorf("id is required")

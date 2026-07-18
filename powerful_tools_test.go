@@ -256,7 +256,7 @@ func TestMeetAndSharedWithMe(t *testing.T) {
 	srv, cap := mockPowerful(t)
 	cs := connectPowerful(t, srv, false, false)
 
-	_, meet := callTool(t, cs, "meet_conference_records", map[string]any{})
+	_, meet := callTool(t, cs, "meet_list_conference_records", map[string]any{})
 	if meet["count"] != float64(1) {
 		t.Errorf("meet count = %v", meet["count"])
 	}
@@ -392,5 +392,50 @@ func TestGetVacationReportsRFC3339Times(t *testing.T) {
 	start, _ := out["startTime"].(string)
 	if start != "2026-07-01T00:00:00Z" {
 		t.Errorf("startTime = %q, want RFC3339 2026-07-01T00:00:00Z", start)
+	}
+}
+
+// tasks_complete had no behavioral test: completing a task is a PATCH setting
+// status, and it must target the named list and task.
+func TestTasksCompleteRidesWriteGate(t *testing.T) {
+	srv, cap := mockPowerful(t)
+
+	cs := connectPowerful(t, srv, false, false)
+	_, out := callTool(t, cs, "tasks_complete", map[string]any{"taskId": "t1"})
+	if out["dryRun"] != true {
+		t.Errorf("expected a dry run with the write gate closed: %v", out)
+	}
+	if cap.called {
+		t.Error("dry run wrote to Google")
+	}
+
+	cs2 := connectPowerful(t, srv, true, false)
+	_, out2 := callTool(t, cs2, "tasks_complete", map[string]any{
+		"tasklist": "list1",
+		"taskId":   "t1",
+	})
+	if out2["applied"] != true {
+		t.Errorf("expected applied, got %v", out2)
+	}
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	if cap.method != http.MethodPatch {
+		t.Errorf("method = %q, want PATCH", cap.method)
+	}
+	if cap.path != "/tasks/v1/lists/list1/tasks/t1" {
+		t.Errorf("path = %q", cap.path)
+	}
+	if !strings.Contains(cap.body, `"status":"completed"`) {
+		t.Errorf("body = %q, want status completed", cap.body)
+	}
+}
+
+func TestTasksCompleteRequiresTaskID(t *testing.T) {
+	srv, _ := mockPowerful(t)
+	cs := connectPowerful(t, srv, true, false)
+
+	msg := callToolErr(t, cs, "tasks_complete", map[string]any{"taskId": "  "})
+	if !strings.Contains(msg, "taskId") {
+		t.Errorf("error = %q, want it to name taskId", msg)
 	}
 }

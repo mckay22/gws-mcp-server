@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/mckay22/gws-mcp-server/internal/gapi"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -93,6 +94,36 @@ func destructiveAnnotations() *mcp.ToolAnnotations {
 		IdempotentHint:  true,
 		OpenWorldHint:   ptrTo(true),
 	}
+}
+
+// enumSchema infers the input schema for In the way AddTool would, then pins the
+// permitted values of one or more properties as a JSON Schema `enum`.
+//
+// Listing the choices only in the description leaves them unenforced: a client
+// has no machine-readable way to know that role must be one of three strings, so
+// the mistake surfaces as a Google 400 (or, worse, a silently ignored parameter)
+// rather than as a schema violation the client can correct before calling. The
+// struct still defines the shape — only the constraint is added — so the schema
+// cannot drift from the Go type.
+//
+// It panics on an unknown property, which is a programming error caught the first
+// time the tool is registered (every test that builds a server exercises this).
+func enumSchema[In any](enums map[string][]string) *jsonschema.Schema {
+	schema, err := jsonschema.For[In](nil)
+	if err != nil {
+		panic(fmt.Sprintf("inferring input schema: %v", err))
+	}
+	for prop, values := range enums {
+		target, ok := schema.Properties[prop]
+		if !ok {
+			panic(fmt.Sprintf("enumSchema: no property %q on %T", prop, *new(In)))
+		}
+		target.Enum = make([]any, len(values))
+		for i, v := range values {
+			target.Enum[i] = v
+		}
+	}
+	return schema
 }
 
 // truncateUTF8 caps b at limit bytes without splitting a multi-byte rune, and

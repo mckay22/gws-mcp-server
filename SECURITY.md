@@ -51,9 +51,16 @@ The shared HTTP mode is an OAuth 2.1 resource server:
   a **new** token via a domain-wide-delegation service account. The caller's
   token is never forwarded to Google.
 - Publishes RFC 9728 Protected Resource Metadata at
-  `/.well-known/oauth-protected-resource`.
+  `/.well-known/oauth-protected-resource` and, when the audience is a URL with a
+  path, at the path-appended location RFC 9728 §3.1 specifies. A 401 carries a
+  `WWW-Authenticate` header pointing at it, so a client can discover where to get
+  a token.
+- Applies cross-origin protection to the MCP endpoint, rejecting cross-origin
+  browser requests (defence in depth against DNS rebinding and CSRF).
 - Refuses a **non-loopback** `--http` bind unless resource-server mode is
-  configured (only then is every request authenticated).
+  configured (only then is every request authenticated). In practice `--http`
+  requires that configuration outright — there is no unauthenticated HTTP mode,
+  loopback or otherwise.
 
 Run resource-server / application mode **behind an authenticating gateway**. That
 gateway owns role-based tool exposure and deny-by-default policy; this server

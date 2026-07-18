@@ -65,7 +65,7 @@ func TestAuditActivities(t *testing.T) {
 	srv, cap := mockGovernance(t)
 	cs := connectGovernance(t, srv)
 
-	_, out := callTool(t, cs, "audit_activities", map[string]any{
+	_, out := callTool(t, cs, "admin_list_audit_activities", map[string]any{
 		"application": "login",
 		"startTime":   "2026-07-01T00:00:00Z",
 	})
@@ -96,7 +96,7 @@ func TestAuditActivitiesReturnsEventParameters(t *testing.T) {
 	srv, cap := mockGovernance(t)
 	cs := connectGovernance(t, srv)
 
-	_, out := callTool(t, cs, "audit_activities", map[string]any{"application": "drive"})
+	_, out := callTool(t, cs, "admin_list_audit_activities", map[string]any{"application": "drive"})
 
 	cap.mu.Lock()
 	q := cap.activityQ
@@ -141,9 +141,13 @@ func TestAuditActivitiesRequiresApplication(t *testing.T) {
 	srv, _ := mockGovernance(t)
 	cs := connectGovernance(t, srv)
 
-	msg := callToolErr(t, cs, "audit_activities", map[string]any{"application": "  "})
-	if !strings.Contains(msg, "application is required") {
-		t.Errorf("error = %q", msg)
+	// A blank application no longer reaches the handler: the schema enum rejects
+	// it and lists the applications that are actually auditable.
+	msg := callToolErr(t, cs, "admin_list_audit_activities", map[string]any{"application": "  "})
+	for _, want := range []string{"application", "login", "drive"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error = %q, want it to mention %q", msg, want)
+		}
 	}
 }
 
@@ -151,7 +155,7 @@ func TestAuditActivitiesValidatesTime(t *testing.T) {
 	srv, _ := mockGovernance(t)
 	cs := connectGovernance(t, srv)
 
-	msg := callToolErr(t, cs, "audit_activities", map[string]any{
+	msg := callToolErr(t, cs, "admin_list_audit_activities", map[string]any{
 		"application": "login",
 		"startTime":   "yesterday",
 	})
@@ -164,7 +168,7 @@ func TestConnectedApps(t *testing.T) {
 	srv, _ := mockGovernance(t)
 	cs := connectGovernance(t, srv)
 
-	_, out := callTool(t, cs, "user_connected_apps", map[string]any{"userKey": "ada@example.com"})
+	_, out := callTool(t, cs, "admin_list_connected_apps", map[string]any{"userKey": "ada@example.com"})
 	if out["count"] != float64(1) {
 		t.Errorf("count = %v, want 1", out["count"])
 	}
@@ -179,7 +183,7 @@ func TestLicenseAssignments(t *testing.T) {
 	srv, _ := mockGovernance(t)
 	cs := connectGovernance(t, srv)
 
-	_, out := callTool(t, cs, "license_assignments", map[string]any{
+	_, out := callTool(t, cs, "admin_list_license_assignments", map[string]any{
 		"productId":  "Google-Apps",
 		"customerId": "C01abc",
 	})
@@ -192,7 +196,7 @@ func TestLicenseAssignmentsRequiresCustomer(t *testing.T) {
 	srv, _ := mockGovernance(t)
 	cs := connectGovernance(t, srv)
 
-	msg := callToolErr(t, cs, "license_assignments", map[string]any{"productId": "Google-Apps"})
+	msg := callToolErr(t, cs, "admin_list_license_assignments", map[string]any{"productId": "Google-Apps"})
 	if !strings.Contains(msg, "customerId") {
 		t.Errorf("error = %q", msg)
 	}

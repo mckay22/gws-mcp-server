@@ -39,7 +39,7 @@ const (
 	roleAssignFields  = "items(roleAssignmentId,roleId,assignedTo,scopeType,orgUnitId),nextPageToken"
 )
 
-// --- directory_users_search ---
+// --- directory_search_users ---
 
 type directoryUsersSearchInput struct {
 	Query      string `json:"query,omitempty" jsonschema:"Admin SDK users query (e.g. \"email:ada*\", \"name:Ada\", \"orgUnitPath=/Sales\", \"isAdmin=true\"); omit to list all users"`
@@ -70,8 +70,11 @@ type directoryUsersSearchOutput struct {
 
 func registerDirectoryUsersSearch(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "directory_users_search",
+		Name:        "directory_search_users",
 		Annotations: readAnnotations(),
+		InputSchema: enumSchema[directoryUsersSearchInput](map[string][]string{
+			"orderBy": {"email", "givenName", "familyName"},
+		}),
 		Title:       "Search directory users",
 		Description: "Search or list users in the Workspace/Cloud Identity directory (Admin SDK). Requires the signed-in user to be an admin. Returns compact summaries; page with nextPageToken.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in directoryUsersSearchInput) (*mcp.CallToolResult, directoryUsersSearchOutput, error) {
@@ -108,13 +111,13 @@ func registerDirectoryUsersSearch(server *mcp.Server, gc *gapi.Client) {
 	})
 }
 
-// --- directory_user_get ---
+// --- directory_get_user ---
 
 type directoryUserGetInput struct {
 	UserKey string `json:"userKey" jsonschema:"the user's primary email or immutable id (required)"`
 }
 
-// DirectoryUserDetail is the fuller user shape returned by directory_user_get.
+// DirectoryUserDetail is the fuller user shape returned by directory_get_user.
 type DirectoryUserDetail struct {
 	ID           string `json:"id"`
 	PrimaryEmail string `json:"primaryEmail"`
@@ -136,7 +139,7 @@ type DirectoryUserDetail struct {
 
 func registerDirectoryUserGet(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "directory_user_get",
+		Name:        "directory_get_user",
 		Annotations: readAnnotations(),
 		Title:       "Get directory user",
 		Description: "Fetch a single directory user by primary email or id (Admin SDK), including aliases, org unit, admin flags, and 2SV enrollment. Requires an admin caller.",
@@ -157,7 +160,7 @@ func registerDirectoryUserGet(server *mcp.Server, gc *gapi.Client) {
 	})
 }
 
-// --- directory_groups_search ---
+// --- directory_search_groups ---
 
 type directoryGroupsSearchInput struct {
 	Query      string `json:"query,omitempty" jsonschema:"Admin SDK groups query (e.g. \"email:eng*\", \"name:Engineering\"); omit to list all groups"`
@@ -184,7 +187,7 @@ type directoryGroupsSearchOutput struct {
 
 func registerDirectoryGroupsSearch(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "directory_groups_search",
+		Name:        "directory_search_groups",
 		Annotations: readAnnotations(),
 		Title:       "Search directory groups",
 		Description: "Search or list groups in the directory (Admin SDK), optionally limited to those a given user belongs to. Requires an admin caller. Page with nextPageToken.",
@@ -221,7 +224,7 @@ func registerDirectoryGroupsSearch(server *mcp.Server, gc *gapi.Client) {
 	})
 }
 
-// --- directory_group_members ---
+// --- directory_list_group_members ---
 
 type directoryGroupMembersInput struct {
 	GroupKey   string `json:"groupKey" jsonschema:"the group's email or id (required)"`
@@ -246,7 +249,7 @@ type directoryGroupMembersOutput struct {
 
 func registerDirectoryGroupMembers(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "directory_group_members",
+		Name:        "directory_list_group_members",
 		Annotations: readAnnotations(),
 		Title:       "List group members",
 		Description: "List the members of a directory group by group email or id (Admin SDK), with each member's role (OWNER/MANAGER/MEMBER) and type. Requires an admin caller. Page with nextPageToken.",
@@ -277,7 +280,7 @@ func registerDirectoryGroupMembers(server *mcp.Server, gc *gapi.Client) {
 	})
 }
 
-// --- directory_roles_list ---
+// --- directory_list_roles ---
 
 type directoryRolesListInput struct {
 	MaxResults int    `json:"maxResults,omitempty" jsonschema:"page size 1-100 (default 25)"`
@@ -301,7 +304,7 @@ type directoryRolesListOutput struct {
 
 func registerDirectoryRolesList(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "directory_roles_list",
+		Name:        "directory_list_roles",
 		Annotations: readAnnotations(),
 		Title:       "List admin roles",
 		Description: "List the admin roles defined for the account (Admin SDK role management) — system roles and custom roles, flagging super-admin. Requires an admin caller with the role-management privilege.",
@@ -328,7 +331,7 @@ func registerDirectoryRolesList(server *mcp.Server, gc *gapi.Client) {
 	})
 }
 
-// --- directory_role_assignments ---
+// --- directory_list_role_assignments ---
 
 type directoryRoleAssignmentsInput struct {
 	UserKey    string `json:"userKey,omitempty" jsonschema:"limit to assignments for this user (email/id)"`
@@ -354,10 +357,10 @@ type directoryRoleAssignmentsOutput struct {
 
 func registerDirectoryRoleAssignments(server *mcp.Server, gc *gapi.Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "directory_role_assignments",
+		Name:        "directory_list_role_assignments",
 		Annotations: readAnnotations(),
 		Title:       "List admin role assignments",
-		Description: "List admin-role assignments (Admin SDK), optionally filtered to a user or a role id — who holds which admin role. assignedTo is a user id (resolve via directory_user_get). Requires an admin caller.",
+		Description: "List admin-role assignments (Admin SDK), optionally filtered to a user or a role id — who holds which admin role. assignedTo is a user id (resolve via directory_get_user). Requires an admin caller.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in directoryRoleAssignmentsInput) (*mcp.CallToolResult, directoryRoleAssignmentsOutput, error) {
 		q := url.Values{}
 		q.Set("maxResults", strconv.Itoa(clampLimit(in.MaxResults)))

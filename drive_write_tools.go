@@ -51,7 +51,7 @@ func buildMultipartUpload(boundary, metadataJSON, contentType, content string) s
 	return b.String()
 }
 
-// --- upload_file (write gate) ---
+// --- drive_upload_file (write gate) ---
 
 type uploadFileInput struct {
 	Name     string `json:"name" jsonschema:"the file name to create (required)"`
@@ -62,7 +62,7 @@ type uploadFileInput struct {
 
 func registerUploadFile(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "upload_file",
+		Name:        "drive_upload_file",
 		Annotations: additiveAnnotations(),
 		Title:       "Upload a Drive file",
 		Description: "Create a new file in Drive with the given text content (multipart upload). Reversible, so it rides the write gate: without " + config.EnvAllowWrites + "=true it returns a dry-run preview of the metadata and content instead of uploading.",
@@ -104,7 +104,7 @@ func registerUploadFile(server *mcp.Server, gc *gapi.Client, allowWrites, allowS
 	})
 }
 
-// --- share_file (send gate: creating a permission is egress) ---
+// --- drive_share_file (send gate: creating a permission is egress) ---
 
 type shareFileInput struct {
 	FileID       string `json:"fileId" jsonschema:"the id of the file/folder to share (required)"`
@@ -117,8 +117,12 @@ type shareFileInput struct {
 
 func registerShareFile(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "share_file",
+		Name:        "drive_share_file",
 		Annotations: additiveAnnotations(),
+		InputSchema: enumSchema[shareFileInput](map[string][]string{
+			"role": {"reader", "commenter", "writer"},
+			"type": {"user", "group", "domain", "anyone"},
+		}),
 		Title:       "Share a Drive file (grant access)",
 		Description: "Grant a permission on a Drive file or folder (POST /files/{id}/permissions) — this exposes the file to another principal (egress). Because it grants access outside the current owner, it is gated by the SEPARATE send gate: without " + config.EnvAllowSends + "=true it returns a dry-run preview of the exact grant instead of applying it.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in shareFileInput) (*mcp.CallToolResult, writeOutput, error) {

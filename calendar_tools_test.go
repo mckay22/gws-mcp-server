@@ -79,7 +79,7 @@ func TestListCalendars(t *testing.T) {
 	srv, _ := mockCalendar(t)
 	cs := connectCalendar(t, srv)
 
-	_, out := callTool(t, cs, "list_calendars", map[string]any{})
+	_, out := callTool(t, cs, "calendar_list_calendars", map[string]any{})
 	if out["count"] != float64(2) {
 		t.Errorf("count = %v, want 2", out["count"])
 	}
@@ -94,7 +94,7 @@ func TestListEventsDefaultsWindowAndSingleEvents(t *testing.T) {
 	srv, cap := mockCalendar(t)
 	cs := connectCalendar(t, srv)
 
-	_, out := callTool(t, cs, "list_events", map[string]any{})
+	_, out := callTool(t, cs, "calendar_list_events", map[string]any{})
 	if out["count"] != float64(1) {
 		t.Errorf("count = %v, want 1", out["count"])
 	}
@@ -128,7 +128,7 @@ func TestListEventsRejectsBadTime(t *testing.T) {
 	srv, _ := mockCalendar(t)
 	cs := connectCalendar(t, srv)
 
-	msg := callToolErr(t, cs, "list_events", map[string]any{"timeMin": "last tuesday"})
+	msg := callToolErr(t, cs, "calendar_list_events", map[string]any{"timeMin": "last tuesday"})
 	if !strings.Contains(msg, "RFC3339") {
 		t.Errorf("error = %q, want RFC3339 validation", msg)
 	}
@@ -138,7 +138,7 @@ func TestGetEvent(t *testing.T) {
 	srv, _ := mockCalendar(t)
 	cs := connectCalendar(t, srv)
 
-	_, out := callTool(t, cs, "get_event", map[string]any{"eventId": "ev1"})
+	_, out := callTool(t, cs, "calendar_get_event", map[string]any{"eventId": "ev1"})
 	if out["summary"] != "Standup" || out["description"] != "Daily sync" {
 		t.Errorf("event = %v", out)
 	}
@@ -148,7 +148,7 @@ func TestGetEventNotFound(t *testing.T) {
 	srv, _ := mockCalendar(t)
 	cs := connectCalendar(t, srv)
 
-	msg := callToolErr(t, cs, "get_event", map[string]any{"eventId": "missing"})
+	msg := callToolErr(t, cs, "calendar_get_event", map[string]any{"eventId": "missing"})
 	if !strings.Contains(msg, "Not Found") {
 		t.Errorf("error = %q", msg)
 	}
@@ -158,7 +158,7 @@ func TestFreeBusyQuery(t *testing.T) {
 	srv, cap := mockCalendar(t)
 	cs := connectCalendar(t, srv)
 
-	_, out := callTool(t, cs, "freebusy_query", map[string]any{"calendarIds": []any{"primary"}})
+	_, out := callTool(t, cs, "calendar_freebusy", map[string]any{"calendarIds": []any{"primary"}})
 	cals := out["calendars"].(map[string]any)
 	primary := cals["primary"].(map[string]any)
 	busy := primary["busy"].([]any)

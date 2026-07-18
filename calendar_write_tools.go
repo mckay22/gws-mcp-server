@@ -42,7 +42,7 @@ func attendeesBody(addrs []string) []map[string]any {
 	return out
 }
 
-// --- create_appointment (write gate; no attendees) ---
+// --- calendar_create_appointment (write gate; no attendees) ---
 
 type createAppointmentInput struct {
 	CalendarID  string `json:"calendarId,omitempty" jsonschema:"calendar id (default 'primary')"`
@@ -55,10 +55,10 @@ type createAppointmentInput struct {
 
 func registerCreateAppointment(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_appointment",
+		Name:        "calendar_create_appointment",
 		Annotations: additiveAnnotations(),
 		Title:       "Create appointment (no attendees)",
-		Description: "Create a personal calendar event with NO attendees — nobody is emailed, so this is a reversible write gated by " + config.EnvAllowWrites + " (or --allow-writes). To invite attendees use create_event_with_attendees, which is send-gated.",
+		Description: "Create a personal calendar event with NO attendees — nobody is emailed, so this is a reversible write gated by " + config.EnvAllowWrites + " (or --allow-writes). To invite attendees use calendar_create_event_with_attendees, which is send-gated.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in createAppointmentInput) (*mcp.CallToolResult, writeOutput, error) {
 		if err := validateEventTimes(in.Summary, in.Start, in.End); err != nil {
 			return nil, writeOutput{}, err
@@ -81,7 +81,7 @@ func registerCreateAppointment(server *mcp.Server, gc *gapi.Client, allowWrites,
 	})
 }
 
-// --- create_event_with_attendees (send gate) ---
+// --- calendar_create_event_with_attendees (send gate) ---
 
 type createEventWithAttendeesInput struct {
 	CalendarID  string   `json:"calendarId,omitempty" jsonschema:"calendar id (default 'primary')"`
@@ -95,7 +95,7 @@ type createEventWithAttendeesInput struct {
 
 func registerCreateEventWithAttendees(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_event_with_attendees",
+		Name:        "calendar_create_event_with_attendees",
 		Annotations: additiveAnnotations(),
 		Title:       "Create event with attendees (sends invites)",
 		Description: "Create a calendar event WITH attendees and email them invitations (sendUpdates=all). Because it notifies people, it is gated by the SEPARATE send gate: without " + config.EnvAllowSends + "=true it returns a dry-run preview of the exact invite instead of sending.",
@@ -104,7 +104,7 @@ func registerCreateEventWithAttendees(server *mcp.Server, gc *gapi.Client, allow
 			return nil, writeOutput{}, err
 		}
 		if len(in.Attendees) == 0 {
-			return nil, writeOutput{}, fmt.Errorf("attendees is required (use create_appointment for an event with no attendees)")
+			return nil, writeOutput{}, fmt.Errorf("attendees is required (use calendar_create_appointment for an event with no attendees)")
 		}
 		body := map[string]any{
 			"summary":   in.Summary,
@@ -126,7 +126,7 @@ func registerCreateEventWithAttendees(server *mcp.Server, gc *gapi.Client, allow
 	})
 }
 
-// --- update_event (send gate) ---
+// --- calendar_update_event (send gate) ---
 
 type updateEventInput struct {
 	CalendarID  string `json:"calendarId,omitempty" jsonschema:"calendar id (default 'primary')"`
@@ -140,7 +140,7 @@ type updateEventInput struct {
 
 func registerUpdateEvent(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "update_event",
+		Name:        "calendar_update_event",
 		Annotations: destructiveAnnotations(),
 		Title:       "Update event (notifies attendees)",
 		Description: "Patch fields of an existing event and notify its attendees of the change (PATCH, sendUpdates=all). Because it emails attendees it is send-gated: without " + config.EnvAllowSends + "=true it returns a dry-run preview of the patch.",
@@ -181,7 +181,7 @@ func registerUpdateEvent(server *mcp.Server, gc *gapi.Client, allowWrites, allow
 	})
 }
 
-// --- cancel_event (send gate) ---
+// --- calendar_cancel_event (send gate) ---
 
 type cancelEventInput struct {
 	CalendarID string `json:"calendarId,omitempty" jsonschema:"calendar id (default 'primary')"`
@@ -190,7 +190,7 @@ type cancelEventInput struct {
 
 func registerCancelEvent(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "cancel_event",
+		Name:        "calendar_cancel_event",
 		Annotations: destructiveAnnotations(),
 		Title:       "Cancel event (notifies attendees)",
 		Description: "Delete/cancel an event and notify its attendees (DELETE, sendUpdates=all). Irreversible and attendee-notifying, so it is send-gated: without " + config.EnvAllowSends + "=true it returns a dry-run preview.",
@@ -210,7 +210,7 @@ func registerCancelEvent(server *mcp.Server, gc *gapi.Client, allowWrites, allow
 	})
 }
 
-// --- respond_to_event (send gate: RSVP notifies the organizer) ---
+// --- calendar_respond_to_event (send gate: RSVP notifies the organizer) ---
 
 type respondToEventInput struct {
 	CalendarID string `json:"calendarId,omitempty" jsonschema:"calendar id (default 'primary')"`
@@ -221,8 +221,11 @@ type respondToEventInput struct {
 
 func registerRespondToEvent(server *mcp.Server, gc *gapi.Client, allowWrites, allowSends bool) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "respond_to_event",
+		Name:        "calendar_respond_to_event",
 		Annotations: destructiveAnnotations(),
+		InputSchema: enumSchema[respondToEventInput](map[string][]string{
+			"response": {"accepted", "declined", "tentative"},
+		}),
 		Title:       "RSVP to an event",
 		Description: "Set the signed-in user's RSVP (accepted/declined/tentative) on an event and notify the organizer (PATCH the matching attendee, sendUpdates=all). Because it emails the organizer it is send-gated: without " + config.EnvAllowSends + "=true it returns a dry-run preview.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in respondToEventInput) (*mcp.CallToolResult, writeOutput, error) {
