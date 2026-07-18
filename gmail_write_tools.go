@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"mime"
+	"net/url"
 	"strings"
 
 	"github.com/mckay22/gws-mcp-server/internal/config"
@@ -156,7 +157,7 @@ func registerGmailModify(server *mcp.Server, gc *gapi.Client, allowWrites, allow
 			Gate:    gateWrites,
 			Method:  "POST",
 			Base:    gapi.BaseGmail,
-			Path:    "/users/me/messages/" + in.ID + "/modify",
+			Path:    "/users/me/messages/" + url.PathEscape(strings.TrimSpace(in.ID)) + "/modify",
 			Body:    body,
 		}
 		return runWrite(ctx, gc, allowWrites, allowSends, plan)

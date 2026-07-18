@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"strings"
@@ -20,22 +22,32 @@ func registerDriveWriteTools(server *mcp.Server, gc *gapi.Client, allowWrites, a
 	registerShareFile(server, gc, allowWrites, allowSends)
 }
 
-// multipartBoundary is a fixed boundary for the upload's multipart/related body.
-// It never appears in JSON metadata, and text content that happens to contain it
-// is still delimited correctly because the body length is set by the parts.
-const multipartBoundary = "gws-mcp-upload-boundary"
+// newMultipartBoundary returns a fresh random delimiter for one upload.
+//
+// A multipart body is parsed by delimiter, not by length, so a boundary that
+// appears inside the content splits the stream into bogus parts and corrupts the
+// upload. The content here is entirely caller-supplied, so the boundary must not
+// be a constant a caller can reproduce: 128 random bits makes an accidental — or
+// deliberate — collision infeasible.
+func newMultipartBoundary() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generating upload boundary: %w", err)
+	}
+	return "gws-mcp-" + hex.EncodeToString(b), nil
+}
 
 // buildMultipartUpload assembles a Drive multipart/related upload body: a JSON
 // metadata part followed by the file content part.
-func buildMultipartUpload(metadataJSON, contentType, content string) string {
+func buildMultipartUpload(boundary, metadataJSON, contentType, content string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "--%s\r\n", multipartBoundary)
+	fmt.Fprintf(&b, "--%s\r\n", boundary)
 	b.WriteString("Content-Type: application/json; charset=UTF-8\r\n\r\n")
 	b.WriteString(metadataJSON)
-	fmt.Fprintf(&b, "\r\n--%s\r\n", multipartBoundary)
+	fmt.Fprintf(&b, "\r\n--%s\r\n", boundary)
 	fmt.Fprintf(&b, "Content-Type: %s\r\n\r\n", contentType)
 	b.WriteString(content)
-	fmt.Fprintf(&b, "\r\n--%s--\r\n", multipartBoundary)
+	fmt.Fprintf(&b, "\r\n--%s--\r\n", boundary)
 	return b.String()
 }
 
@@ -71,7 +83,11 @@ func registerUploadFile(server *mcp.Server, gc *gapi.Client, allowWrites, allowS
 		if err != nil {
 			return nil, writeOutput{}, err
 		}
-		bodyStr := buildMultipartUpload(metadataJSON, mimeType, in.Content)
+		boundary, err := newMultipartBoundary()
+		if err != nil {
+			return nil, writeOutput{}, err
+		}
+		bodyStr := buildMultipartUpload(boundary, metadataJSON, mimeType, in.Content)
 
 		plan := writePlan{
 			Summary:        fmt.Sprintf("upload file %q (%s, %d bytes)", in.Name, mimeType, len(in.Content)),
@@ -82,7 +98,7 @@ func registerUploadFile(server *mcp.Server, gc *gapi.Client, allowWrites, allowS
 			Query:          url.Values{"uploadType": {"multipart"}, "fields": {"id,name,mimeType,webViewLink"}},
 			Body:           map[string]any{"name": in.Name, "mimeType": mimeType, "parentId": in.ParentID, "bytes": len(in.Content)},
 			RawBody:        []byte(bodyStr),
-			RawContentType: "multipart/related; boundary=" + multipartBoundary,
+			RawContentType: "multipart/related; boundary=" + boundary,
 		}
 		return runWrite(ctx, gc, allowWrites, allowSends, plan)
 	})

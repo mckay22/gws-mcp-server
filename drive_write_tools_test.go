@@ -2,6 +2,8 @@ package main
 
 import (
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -89,6 +91,69 @@ func TestUploadFileRidesWriteGate(t *testing.T) {
 	}
 	if !strings.Contains(cap.body, `"name":"notes.txt"`) || !strings.Contains(cap.body, "hello file") {
 		t.Errorf("multipart body missing metadata or content: %q", cap.body)
+	}
+}
+
+// TestUploadBoundaryIsUnpredictable guards the multipart delimiter. A multipart
+// body is split by delimiter, not by length, so a boundary a caller can predict
+// (it used to be a fixed constant) lets file content containing that string
+// break the body into bogus parts and corrupt the upload.
+func TestUploadBoundaryIsUnpredictable(t *testing.T) {
+	first, err := newMultipartBoundary()
+	if err != nil {
+		t.Fatalf("newMultipartBoundary: %v", err)
+	}
+	seen := map[string]bool{first: true}
+	for i := 0; i < 50; i++ {
+		b, err := newMultipartBoundary()
+		if err != nil {
+			t.Fatalf("newMultipartBoundary: %v", err)
+		}
+		if seen[b] {
+			t.Fatalf("boundary %q repeated — it must be unpredictable per upload", b)
+		}
+		seen[b] = true
+	}
+
+	// The parts must still be delimited by the boundary that the Content-Type
+	// announces, and content echoing an old fixed boundary must not split them.
+	srv, cap := mockDriveWrite(t)
+	cs := connectDriveWrite(t, srv, true, false)
+	hostile := "line one\r\n--gws-mcp-upload-boundary\r\nContent-Type: text/plain\r\n\r\ninjected\r\n"
+	callTool(t, cs, "upload_file", map[string]any{
+		"name":    "notes.txt",
+		"content": hostile,
+	})
+
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	_, params, err := mime.ParseMediaType(cap.contentType)
+	if err != nil {
+		t.Fatalf("parsing Content-Type %q: %v", cap.contentType, err)
+	}
+	boundary := params["boundary"]
+	if boundary == "" {
+		t.Fatal("Content-Type declares no boundary")
+	}
+	if strings.Contains(hostile, boundary) {
+		t.Fatalf("boundary %q appears in the caller's content", boundary)
+	}
+	// Exactly two parts: the JSON metadata and the file content, intact.
+	mr := multipart.NewReader(strings.NewReader(cap.body), boundary)
+	var parts []string
+	for {
+		p, err := mr.NextPart()
+		if err != nil {
+			break
+		}
+		b, _ := io.ReadAll(p)
+		parts = append(parts, string(b))
+	}
+	if len(parts) != 2 {
+		t.Fatalf("multipart body parsed into %d parts, want 2: %q", len(parts), cap.body)
+	}
+	if parts[1] != hostile {
+		t.Errorf("content part was altered by the boundary in the payload:\n got %q\nwant %q", parts[1], hostile)
 	}
 }
 

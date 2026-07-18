@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/mckay22/gws-mcp-server/internal/gapi"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -89,6 +91,54 @@ func destructiveAnnotations() *mcp.ToolAnnotations {
 		IdempotentHint:  true,
 		OpenWorldHint:   ptrTo(true),
 	}
+}
+
+// truncateUTF8 caps b at limit bytes without splitting a multi-byte rune, and
+// reports whether it cut. Slicing on a raw byte offset can leave a partial rune
+// that renders as a replacement character, so any trailing fragment (at most
+// three bytes, since a rune is at most four) is dropped.
+func truncateUTF8(b []byte, limit int) ([]byte, bool) {
+	if len(b) <= limit {
+		return b, false
+	}
+	cut := b[:limit]
+	for i := 0; i < 3 && len(cut) > 0; i++ {
+		// DecodeLastRune reports (RuneError, 1) for a stray byte, but (RuneError, 3)
+		// for a genuine U+FFFD — the size distinguishes them.
+		if r, size := utf8.DecodeLastRune(cut); r == utf8.RuneError && size <= 1 {
+			cut = cut[:len(cut)-1]
+			continue
+		}
+		break
+	}
+	return cut, true
+}
+
+// textualMIME reports whether a MIME type names content that is meaningful as
+// text. Anything else — PDFs, images, archives, Office binaries — would reach the
+// caller as a wall of replacement characters, so the content tools refuse it
+// instead of filling a model's context with noise.
+func textualMIME(mimeType string) bool {
+	m := strings.ToLower(strings.TrimSpace(mimeType))
+	if i := strings.IndexByte(m, ';'); i >= 0 { // drop parameters: "text/plain; charset=utf-8"
+		m = strings.TrimSpace(m[:i])
+	}
+	if strings.HasPrefix(m, "text/") {
+		return true
+	}
+	// Structured-syntax suffixes (RFC 6839): application/ld+json, atom+xml, …
+	if strings.HasSuffix(m, "+json") || strings.HasSuffix(m, "+xml") || strings.HasSuffix(m, "+yaml") {
+		return true
+	}
+	switch m {
+	case "application/json", "application/xml", "application/yaml", "application/x-yaml",
+		"application/javascript", "application/x-javascript", "application/ecmascript",
+		"application/typescript", "application/sql", "application/graphql",
+		"application/x-sh", "application/x-shellscript", "application/rtf",
+		"application/csv", "application/toml", "application/x-ndjson":
+		return true
+	}
+	return false
 }
 
 // jsonString marshals v to a compact JSON string.

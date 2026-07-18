@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -234,27 +235,76 @@ func registerRespondToEvent(server *mcp.Server, gc *gapi.Client, allowWrites, al
 		default:
 			return nil, writeOutput{}, fmt.Errorf("response must be accepted, declined, or tentative, got %q", in.Response)
 		}
-		// A PATCH replaces the attendees array, so we send only the responding
-		// attendee with the new status; Calendar merges by email.
-		body := map[string]any{
-			"attendees": []map[string]any{
-				{"email": in.SelfEmail, "responseStatus": resp},
-			},
-		}
+		calendarID := calendarOrPrimary(in.CalendarID)
+		path := "/calendars/" + url.PathEscape(calendarID) + "/events/" + url.PathEscape(in.EventID)
 		plan := writePlan{
 			Summary: fmt.Sprintf("RSVP %s to event %s as %s", resp, in.EventID, in.SelfEmail),
 			Gate:    gateSends,
 			Method:  "PATCH",
 			Base:    gapi.BaseCalendar,
-			Path:    "/calendars/" + url.PathEscape(calendarOrPrimary(in.CalendarID)) + "/events/" + url.PathEscape(in.EventID),
+			Path:    path,
 			Query:   url.Values{"sendUpdates": {"all"}},
-			Body:    body,
+			// The preview states the intent; the body actually sent is built at
+			// apply time from the event's current attendees (see rsvpBody).
+			Body: map[string]any{
+				"attendee":       in.SelfEmail,
+				"responseStatus": resp,
+				"note":           "the event's current attendee list is re-sent unchanged apart from this RSVP",
+			},
+			Prepare: func(ctx context.Context) (any, error) {
+				return rsvpBody(ctx, gc, path, in.SelfEmail, resp)
+			},
 		}
 		return runWrite(ctx, gc, allowWrites, allowSends, plan)
 	})
 }
 
 // --- helpers ---
+
+// rsvpBody builds the PATCH body for an RSVP: the event's current attendee list
+// with exactly one entry's responseStatus changed.
+//
+// Calendar has no RSVP endpoint — you patch your own entry in the event's
+// attendees array — and its PATCH overwrites array fields wholesale rather than
+// merging them. Sending just the responding attendee would therefore silently
+// drop every other attendee from the event, so the list is read first and sent
+// back intact. Attendee objects are round-tripped as raw maps, and the fields
+// projection asks for whole `attendees` objects, so per-attendee fields this
+// server does not model (comment, additionalGuests, resource, …) survive
+// untouched instead of being blanked by the write.
+func rsvpBody(ctx context.Context, gc *gapi.Client, eventPath, selfEmail, responseStatus string) (any, error) {
+	raw, err := gc.Get(ctx, gapi.BaseCalendar, eventPath, url.Values{"fields": {"attendees"}})
+	if err != nil {
+		return nil, err
+	}
+	var ev struct {
+		Attendees []map[string]any `json:"attendees"`
+	}
+	if err := json.Unmarshal(raw, &ev); err != nil {
+		return nil, fmt.Errorf("decoding event attendees: %w", err)
+	}
+
+	want := strings.TrimSpace(strings.ToLower(selfEmail))
+	matched := false
+	for _, a := range ev.Attendees {
+		email, _ := a["email"].(string)
+		if strings.ToLower(strings.TrimSpace(email)) == want {
+			a["responseStatus"] = responseStatus
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		// Deliberately no "just use the attendee Calendar flagged as self" fallback:
+		// it would silently RSVP as a different person whenever the caller passed
+		// the wrong address, which is worse than refusing.
+		// Patching anyway would replace the attendee list with this one address,
+		// removing everyone else from the event.
+		return nil, fmt.Errorf("%q is not an attendee of this event, so the RSVP was not sent "+
+			"(applying it would have removed the event's %d existing attendee(s))", selfEmail, len(ev.Attendees))
+	}
+	return map[string]any{"attendees": ev.Attendees}, nil
+}
 
 // validateEventTimes checks a create's required summary and RFC3339 bounds.
 func validateEventTimes(summary, start, end string) error {

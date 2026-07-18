@@ -49,6 +49,34 @@ API call shapes) on top of the first pass below.
   `docs/capabilities.md` now spells out for policy-layer consumers. Contract
   tests assert every tool is annotated, that no read-only tool claims
   destructiveness, and pin the classification of the 23 mutations by name.
+- **(High) `respond_to_event` no longer removes the other attendees.** Calendar's
+  PATCH overwrites array fields wholesale rather than merging them (a code
+  comment asserted the opposite), so an RSVP that sent only the responding
+  attendee replaced the event's attendee list with that one entry — everyone else
+  silently dropped from the meeting. The RSVP is now a read-modify-write: it
+  reads the current attendees, changes only its own `responseStatus`, and sends
+  the list back intact, round-tripping per-attendee fields this server does not
+  model. An address that is not on the event is refused rather than applied. To
+  keep the dry-run contract exact, `writePlan` gained `Prepare`, which builds a
+  body at apply time only — a closed gate still makes no Google call of any kind,
+  including this read.
+- **(High) `get_file_content` actually rejects binaries now.** Its description
+  promised "binary files without a text form are rejected", but only Google-native
+  types were refused: a PDF, PNG, or zip was downloaded and returned as a string
+  of replacement characters, spending the caller's context to say nothing. Files
+  are now checked against a textual-MIME test (`text/*`, JSON/XML/YAML including
+  `+json`/`+xml` suffixes, and friends) before any download.
+- **(Medium) Truncation no longer splits a UTF-8 rune.** Drive content and Gmail
+  bodies were capped on a raw byte offset, which could leave a partial rune
+  rendering as a stray replacement character at the end. Both now cut on a rune
+  boundary.
+- **(Medium) Drive uploads use an unpredictable multipart boundary.** The
+  delimiter was the fixed constant `gws-mcp-upload-boundary`, and a multipart body
+  is parsed by delimiter rather than by length (a comment claimed length made it
+  safe), so caller-supplied content containing that string split the body into
+  bogus parts. Each upload now uses a fresh 128-bit random boundary.
+- **(Medium) `gmail_modify` path-escapes its message id**, the one place in the
+  tool surface that interpolated a caller-supplied id into a URL path unescaped.
 - **(Medium) Cross-origin protection on the MCP endpoint.** The streamable HTTP
   handler is wrapped in `net/http`'s `CrossOriginProtection` (the SDK applies
   none by default in v1.6.x), rejecting cross-origin browser requests as

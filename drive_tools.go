@@ -192,6 +192,12 @@ func registerGetFileContent(server *mcp.Server, gc *gapi.Client) {
 		} else if strings.HasPrefix(meta.MimeType, "application/vnd.google-apps.") {
 			// A Google-native type with no text export (Forms, Drawings, …).
 			return nil, getFileContentOutput{}, fmt.Errorf("file %q (%s) has no text export available", meta.Name, meta.MimeType)
+		} else if !textualMIME(meta.MimeType) {
+			// Refuse before downloading: this tool returns text, and a PDF or image
+			// would otherwise be handed back as a wall of replacement characters
+			// that costs context and tells the caller nothing.
+			return nil, getFileContentOutput{}, fmt.Errorf(
+				"file %q is %s, which has no text form — get_file_content returns text only", meta.Name, meta.MimeType)
 		} else {
 			body, _, err = gc.GetRaw(ctx, gapi.BaseDrive, "/files/"+url.PathEscape(fileID), url.Values{
 				"alt":               {"media"},
@@ -202,10 +208,8 @@ func registerGetFileContent(server *mcp.Server, gc *gapi.Client) {
 			return nil, getFileContentOutput{}, toolError(err)
 		}
 
-		if len(body) > maxFileContentBytes {
-			body = body[:maxFileContentBytes]
-			out.Truncated = true
-		}
+		body, truncated := truncateUTF8(body, maxFileContentBytes)
+		out.Truncated = truncated
 		out.Content = string(body)
 		return text(fmt.Sprintf("%s (%s), %d bytes", out.Name, out.MimeType, len(out.Content))), out, nil
 	})

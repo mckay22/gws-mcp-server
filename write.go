@@ -56,6 +56,16 @@ type writePlan struct {
 	// it; Body still carries the readable description for preview/output.
 	RawBody        []byte
 	RawContentType string
+	// Prepare, when non-nil, computes the request body at apply time, replacing
+	// Body/ApplyBody. It runs ONLY once the gate is open, so a dry run still makes
+	// no Google call.
+	//
+	// It exists for the mutations that must read current state before writing it:
+	// Google's PATCH overwrites array fields wholesale, so changing one element of
+	// an array (an RSVP among an event's attendees) means fetching the array,
+	// editing the one entry, and sending it back intact. Body still carries the
+	// readable intent for the preview.
+	Prepare func(ctx context.Context) (any, error)
 }
 
 // writeOutput is the structured result of a write tool: the planned request plus
@@ -112,6 +122,16 @@ func runWrite(ctx context.Context, gc *gapi.Client, allowWrites, allowSends bool
 	applyBody := plan.Body
 	if plan.ApplyBody != nil {
 		applyBody = plan.ApplyBody
+	}
+	if plan.Prepare != nil {
+		// Read-modify-write: build the body from current state now that the gate is
+		// open. A failure here aborts before any mutation is sent.
+		prepared, err := plan.Prepare(ctx)
+		if err != nil {
+			return nil, writeOutput{}, err
+		}
+		applyBody = prepared
+		out.Body = prepared // report what was actually sent, not the intent
 	}
 
 	var (

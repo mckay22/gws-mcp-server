@@ -373,10 +373,8 @@ func plainTextBody(part gmailPart) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	if len(decoded) > maxBodyBytes {
-		return string(decoded[:maxBodyBytes]), true
-	}
-	return string(decoded), false
+	capped, truncated := truncateUTF8(decoded, maxBodyBytes)
+	return string(capped), truncated
 }
 
 // firstTextPlain returns the raw base64url body data of the first text/plain

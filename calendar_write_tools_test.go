@@ -19,6 +19,10 @@ type calWriteCapture struct {
 	path        string
 	sendUpdates string
 	body        string
+	// reads counts event GETs, which the RSVP read-modify-write performs before
+	// its PATCH. Tracked separately so a dry run can be asserted to make no call
+	// of any kind.
+	reads int
 }
 
 func mockCalendarWrite(t *testing.T) (*httptest.Server, *calWriteCapture) {
@@ -39,6 +43,18 @@ func mockCalendarWrite(t *testing.T) (*httptest.Server, *calWriteCapture) {
 	mux.HandleFunc("POST /calendar/v3/calendars/{cal}/events", handler)
 	mux.HandleFunc("PATCH /calendar/v3/calendars/{cal}/events/{ev}", handler)
 	mux.HandleFunc("DELETE /calendar/v3/calendars/{cal}/events/{ev}", handler)
+	// The event read behind the RSVP read-modify-write. Three attendees, so a
+	// PATCH that fails to preserve them is visible.
+	mux.HandleFunc("GET /calendar/v3/calendars/{cal}/events/{ev}", func(w http.ResponseWriter, r *http.Request) {
+		cap.mu.Lock()
+		cap.reads++
+		cap.mu.Unlock()
+		writeJSON(w, http.StatusOK, `{"attendees":[
+			{"email":"ada@example.com","responseStatus":"needsAction","self":true},
+			{"email":"grace@example.com","responseStatus":"accepted"},
+			{"email":"alan@example.com","responseStatus":"declined","comment":"conflict","additionalGuests":2}
+		]}`)
+	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv, cap
@@ -144,7 +160,12 @@ func TestRespondToEventValidatesResponse(t *testing.T) {
 	}
 }
 
-func TestRespondToEventApplies(t *testing.T) {
+// TestRespondToEventPreservesOtherAttendees is the regression test for the
+// attendee-wipe bug. Calendar's PATCH overwrites array fields wholesale, so an
+// RSVP that sends only the responding attendee silently removes everyone else
+// from the event. The RSVP must read the current list and send it back with only
+// its own responseStatus changed.
+func TestRespondToEventPreservesOtherAttendees(t *testing.T) {
 	srv, cap := mockCalendarWrite(t)
 	cs := connectCalendarWrite(t, srv, false, true)
 
@@ -161,8 +182,67 @@ func TestRespondToEventApplies(t *testing.T) {
 	if cap.method != http.MethodPatch {
 		t.Errorf("method = %q, want PATCH", cap.method)
 	}
-	if !strings.Contains(cap.body, `"responseStatus":"accepted"`) || !strings.Contains(cap.body, "ada@example.com") {
-		t.Errorf("body = %q", cap.body)
+	if cap.reads != 1 {
+		t.Errorf("event reads = %d, want 1 (the RSVP must read the attendee list first)", cap.reads)
+	}
+	if !strings.Contains(cap.body, `"email":"ada@example.com","responseStatus":"accepted"`) &&
+		!strings.Contains(cap.body, `"responseStatus":"accepted","email":"ada@example.com"`) {
+		t.Errorf("responder's status not set to accepted; body = %q", cap.body)
+	}
+	// The other attendees must still be there, with their own status intact.
+	for _, want := range []string{"grace@example.com", "alan@example.com"} {
+		if !strings.Contains(cap.body, want) {
+			t.Errorf("PATCH dropped attendee %s — the event would lose them; body = %q", want, cap.body)
+		}
+	}
+	if !strings.Contains(cap.body, `"responseStatus":"declined"`) {
+		t.Errorf("another attendee's responseStatus was not preserved; body = %q", cap.body)
+	}
+	// Per-attendee fields this server does not model must survive the round trip.
+	if !strings.Contains(cap.body, "conflict") || !strings.Contains(cap.body, "additionalGuests") {
+		t.Errorf("unmodeled attendee fields were dropped; body = %q", cap.body)
+	}
+}
+
+// A closed gate must make NO Google call at all — not even the read behind the
+// read-modify-write.
+func TestRespondToEventDryRunCallsNothing(t *testing.T) {
+	srv, cap := mockCalendarWrite(t)
+	cs := connectCalendarWrite(t, srv, true, false) // write open, send CLOSED
+
+	_, out := callTool(t, cs, "respond_to_event", map[string]any{
+		"eventId":   "ev1",
+		"selfEmail": "ada@example.com",
+		"response":  "accepted",
+	})
+	if out["dryRun"] != true || out["applied"] == true {
+		t.Errorf("expected a dry run, got %v", out)
+	}
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	if cap.called || cap.reads != 0 {
+		t.Errorf("dry run called Google (mutated=%v reads=%d)", cap.called, cap.reads)
+	}
+}
+
+// RSVP-ing as someone who is not on the event must fail loudly rather than PATCH
+// a one-element attendee list over the real one.
+func TestRespondToEventRefusesNonAttendee(t *testing.T) {
+	srv, cap := mockCalendarWrite(t)
+	cs := connectCalendarWrite(t, srv, false, true)
+
+	msg := callToolErr(t, cs, "respond_to_event", map[string]any{
+		"eventId":   "ev1",
+		"selfEmail": "stranger@example.com",
+		"response":  "accepted",
+	})
+	if !strings.Contains(msg, "not an attendee") {
+		t.Errorf("error = %q, want it to explain the address is not an attendee", msg)
+	}
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	if cap.called {
+		t.Errorf("a mutation was sent despite the responder not being an attendee: %s %s", cap.method, cap.body)
 	}
 }
 
